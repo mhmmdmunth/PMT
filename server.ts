@@ -1,10 +1,12 @@
 import express from "express";
+import http from "http";
 import path from "path";
 import fs from "fs";
 import fsPromises from "fs/promises";
 
 async function startServer() {
   const app = express();
+  const httpServer = http.createServer(app);
   const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
   app.use(express.json({ limit: "50mb" }));
@@ -53,8 +55,13 @@ async function startServer() {
   if (!isProduction) {
     console.log("[Server] Running in Vite development middleware mode");
     const { createServer: createViteServer } = await import("vite");
+    const hmrDisabled = process.env.DISABLE_HMR === "true";
+    // Share the HTTP server with Vite so the HMR WebSocket is reachable on the same port the preview proxy forwards.
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: hmrDisabled ? false : { server: httpServer, overlay: false },
+      },
       appType: "spa",
     });
     app.use(vite.middlewares);
@@ -81,7 +88,7 @@ async function startServer() {
     });
   }
 
-  const server = app.listen(PORT, "0.0.0.0", () => {
+  const server = httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`[Cloud Run] Server successfully started and listening on http://0.0.0.0:${PORT}`);
   });
 

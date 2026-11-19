@@ -76,8 +76,7 @@ export default defineConfig(() => {
       allowedHosts: ['.vercel.run', '.v0.build'],
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
-      // The preview proxy serves HTTPS on 443, so the HMR client must connect there instead of the dev server port.
-      hmr: process.env.DISABLE_HMR === 'true' ? false : { overlay: false, clientPort: 443 },
+      hmr: process.env.DISABLE_HMR === 'true' ? false : { overlay: false },
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
     },
