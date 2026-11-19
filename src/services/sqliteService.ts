@@ -1208,7 +1208,11 @@ class SqliteService {
 
     // Seed Project Schedule
     const stmtProj = this.db.prepare(`
-      INSERT OR REPLACE INTO projects VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT OR REPLACE INTO projects (
+        id, vessel_id, arrive_bgn, start_contract, arrival_meeting,
+        docking_date, undocking_date, finish_work, sail_out,
+        docking_position, docking_duration_days, status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     stmtProj.run([
       DEFAULT_SCHEDULE.id,
