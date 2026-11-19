@@ -66,6 +66,18 @@ export const firebaseSyncService = {
     }
   },
 
+  async fetchProjectData(
+    projectId: string
+  ): Promise<{ status: 'found'; data: any } | { status: 'missing' } | { status: 'error' }> {
+    try {
+      const snap = await getDoc(doc(db, 'projects', projectId));
+      return snap.exists() ? { status: 'found', data: snap.data() } : { status: 'missing' };
+    } catch (e) {
+      console.error('Error loading project data from Firestore:', e);
+      return { status: 'error' };
+    }
+  },
+
   subscribeProjectData(projectId: string, onUpdate: (data: any) => void): () => void {
     const docRef = doc(db, 'projects', projectId);
     const unsubscribe = onSnapshot(docRef, (docSnap) => {
