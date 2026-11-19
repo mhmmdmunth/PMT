@@ -178,6 +178,9 @@ export default function App() {
   const isApplyingCloudUpdateRef = useRef<boolean>(false);
   const lastCloudUpdatedAtRef = useRef<string | null>(null);
   const cloudSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Local pushes are blocked until the cloud copy for this project has been read,
+  // otherwise a fresh browser's default seed data overwrites the shared Firestore data.
+  const cloudReadyProjectIdRef = useRef<string | null>(null);
 
   const scheduleCloudSync = useCallback(
     (
@@ -243,7 +246,11 @@ export default function App() {
         setAllProjects(projectService.getAllProjects());
 
         // Never echo incoming cloud updates back to Firestore (prevents infinite snapshot loop)
-        if (!options?.skipCloudPush && !isApplyingCloudUpdateRef.current) {
+        if (
+          !options?.skipCloudPush &&
+          !isApplyingCloudUpdateRef.current &&
+          cloudReadyProjectIdRef.current === activeProj.id
+        ) {
           scheduleCloudSync(activeProj.id, snapshotPayload);
         }
       }
@@ -256,43 +263,63 @@ export default function App() {
     if (currentView !== 'workspace' || !currentProject?.id) return;
 
     const projId = currentProject.id;
+    let cancelled = false;
+
+    cloudReadyProjectIdRef.current = null;
+    if (cloudSyncTimerRef.current) {
+      clearTimeout(cloudSyncTimerRef.current);
+      cloudSyncTimerRef.current = null;
+    }
 
     const applyCloudSnapshot = (cloudData: any) => {
-      if (!cloudData || !cloudData.workItems) return;
-      if (cloudData.updatedAt && cloudData.updatedAt === lastCloudUpdatedAtRef.current) {
-        return;
+      if (cancelled || !cloudData || !Array.isArray(cloudData.workItems)) return;
+      // Cloud is now the source of truth; drop any queued local push based on older data.
+      if (cloudSyncTimerRef.current) {
+        clearTimeout(cloudSyncTimerRef.current);
+        cloudSyncTimerRef.current = null;
       }
+      const alreadyApplied =
+        cloudData.updatedAt && cloudData.updatedAt === lastCloudUpdatedAtRef.current;
       if (cloudData.updatedAt) {
         lastCloudUpdatedAtRef.current = cloudData.updatedAt;
       }
 
-      isApplyingCloudUpdateRef.current = true;
-      try {
-        if (Array.isArray(cloudData.workItems) && cloudData.workItems.length > 0) {
+      if (!alreadyApplied) {
+        isApplyingCloudUpdateRef.current = true;
+        try {
           sqliteService.importWorkItems(cloudData.workItems, 'replace');
+          if (cloudData.vessel) sqliteService.updateVessel(cloudData.vessel);
+          if (cloudData.schedule) sqliteService.updateProjectSchedule(cloudData.schedule);
+          if (Array.isArray(cloudData.opnameItems)) {
+            sqliteService.importOpnameWorkItems(cloudData.opnameItems, 'replace');
+          }
+          if (cloudData.signatures) sqliteService.updateSignatures(cloudData.signatures);
+          loadDataFromSqlite({ skipCloudPush: true });
+        } finally {
+          isApplyingCloudUpdateRef.current = false;
         }
-        if (cloudData.vessel) sqliteService.updateVessel(cloudData.vessel);
-        if (cloudData.schedule) sqliteService.updateProjectSchedule(cloudData.schedule);
-        if (Array.isArray(cloudData.opnameItems) && cloudData.opnameItems.length > 0) {
-          sqliteService.importOpnameWorkItems(cloudData.opnameItems, 'replace');
-        }
-        loadDataFromSqlite({ skipCloudPush: true });
-      } finally {
-        isApplyingCloudUpdateRef.current = false;
       }
+      cloudReadyProjectIdRef.current = projId;
     };
 
-    // 1. Load initial cloud data if available
-    firebaseSyncService.loadProjectData(projId).then((cloudData) => {
-      if (cloudData && cloudData.workItems && cloudData.workItems.length > 0) {
-        applyCloudSnapshot(cloudData);
+    // 1. Read the shared cloud copy first; only seed the cloud when no document exists yet
+    firebaseSyncService.fetchProjectData(projId).then((result) => {
+      if (cancelled) return;
+      if (result.status === 'found') {
+        applyCloudSnapshot(result.data);
+      } else if (result.status === 'missing') {
+        cloudReadyProjectIdRef.current = projId;
+        loadDataFromSqlite();
       }
+      // On read errors keep pushes disabled so unverified local data never overwrites the cloud.
     });
 
     // 2. Subscribe to real-time changes from other users
     const unsubscribe = firebaseSyncService.subscribeProjectData(projId, applyCloudSnapshot);
 
     return () => {
+      cancelled = true;
+      cloudReadyProjectIdRef.current = null;
       unsubscribe();
       if (cloudSyncTimerRef.current) {
         clearTimeout(cloudSyncTimerRef.current);
