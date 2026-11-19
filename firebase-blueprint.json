@@ -1,0 +1,27 @@
+{
+  "entities": {
+    "ProjectData": {
+      "title": "ProjectData",
+      "description": "Shipyard project data storage including vessel, schedule, categories, work items, and surveys.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "vessel": { "type": "object" },
+        "schedule": { "type": "object" },
+        "categories": { "type": "array" },
+        "workItems": { "type": "array" },
+        "opnameItems": { "type": "array" },
+        "defectSurveys": { "type": "array" },
+        "signatures": { "type": "object" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id"]
+    }
+  },
+  "firestore": {
+    "/projects/{projectId}": {
+      "schema": { "$ref": "#/entities/ProjectData" },
+      "description": "Project document storing collaborative shipyard repair data for multi-user access."
+    }
+  }
+}
