@@ -1921,8 +1921,58 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
     spreadsheet.showToast('✓ Penomoran otomatis berurutan (1, 1.1, 1.1.1) telah diterapkan.');
   };
 
+  const tableScrollRef = useRef<HTMLDivElement | null>(null);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  const updateScrollHint = useCallback(() => {
+    const el = tableScrollRef.current;
+    if (!el) return;
+    const hasOverflow = el.scrollWidth - el.clientWidth > 2;
+    const remainingRight = el.scrollWidth - (el.scrollLeft + el.clientWidth);
+    setCanScrollRight(hasOverflow && remainingRight > 4);
+  }, []);
+
+  useEffect(() => {
+    const el = tableScrollRef.current;
+    if (!el) return;
+
+    updateScrollHint();
+
+    let rafId = 0;
+    const scheduleMeasure = () => {
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(updateScrollHint);
+    };
+
+    const resizeObserver =
+      typeof ResizeObserver !== 'undefined'
+        ? new ResizeObserver(scheduleMeasure)
+        : null;
+
+    resizeObserver?.observe(el);
+    const tableEl = el.querySelector('table');
+    if (tableEl) {
+      resizeObserver?.observe(tableEl);
+    }
+    window.addEventListener('resize', scheduleMeasure);
+
+    return () => {
+      cancelAnimationFrame(rafId);
+      resizeObserver?.disconnect();
+      window.removeEventListener('resize', scheduleMeasure);
+    };
+  }, [
+    updateScrollHint,
+    filteredWorkItems.length,
+    selectedCategory,
+    selectedDepartment,
+    selectedAreaId,
+    collapsedCats,
+    collapsedNodes,
+  ]);
+
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 w-full max-w-full min-w-0">
       {/* 1. Category & Department Filter Bar */}
       <div className="bg-white px-3 py-2.5 rounded-xl border border-slate-200 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-2.5 text-xs">
         {/* Left: Department, Category, Area dropdowns */}
@@ -2224,7 +2274,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
       <div
         tabIndex={0}
         onKeyDown={spreadsheet.handleKeyDown}
-        className="bg-white rounded-xl border-2 border-[#03442C]/40 shadow-sm overflow-hidden outline-hidden focus:ring-1 focus:ring-emerald-500"
+        className="w-full max-w-full min-w-0 bg-white rounded-xl border-2 border-[#03442C]/40 shadow-sm overflow-hidden outline-hidden focus:ring-1 focus:ring-emerald-500"
       >
         {/* Mobile/Tablet Horizontal Scroll Hint */}
         <div className="block lg:hidden px-3 py-1 bg-emerald-50/90 border-b border-emerald-200 text-[11px] text-emerald-800 flex items-center justify-between">
@@ -2235,31 +2285,53 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
           </span>
           <span className="font-mono text-[10px] text-emerald-600 font-semibold">Touch-Scroll</span>
         </div>
-        <div className="overflow-x-auto scrollbar-thin">
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDndKitDragEnd}>
-          <SortableContext items={sortableItemIds} strategy={verticalListSortingStrategy}>
-            <table className="w-full table-fixed min-w-[1450px] text-left text-xs border-collapse border border-slate-300">
+        {/* Horizontal Scroll Wrapper + Right-Side Scroll-Hint Shadow */}
+        <div className="relative w-full max-w-full min-w-0">
+          <div
+            ref={tableScrollRef}
+            onScroll={updateScrollHint}
+            className="w-full max-w-full min-w-0 overflow-x-auto touch-pan-x scrollbar-thin repair-scroll-container"
+          >
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDndKitDragEnd}>
+            <SortableContext items={sortableItemIds} strategy={verticalListSortingStrategy}>
+            <table className="w-full table-fixed min-w-[1592px] text-left text-xs border-collapse border border-slate-300">
+            <colgroup>
+              <col className="w-10 min-w-[40px]" />
+              <col className="w-16 min-w-[64px]" />
+              <col className="w-[360px] min-w-[360px]" />
+              <col className="w-[180px] min-w-[180px]" />
+              <col className="w-24 min-w-[96px]" />
+              <col className="w-16 min-w-[64px]" />
+              <col className="w-16 min-w-[64px]" />
+              <col className="w-16 min-w-[64px]" />
+              <col className="w-[88px] min-w-[88px]" />
+              <col className="w-16 min-w-[64px]" />
+              <col className="w-[88px] min-w-[88px]" />
+              <col className="w-[84px] min-w-[84px]" />
+              <col className="w-[160px] min-w-[160px]" />
+              <col className="w-44 min-w-[176px]" />
+            </colgroup>
             <thead>
               <tr className="bg-[#03442C] text-white font-bold uppercase text-[10px] tracking-wider align-middle border-b-2 border-emerald-950 h-10">
-                <th className="py-2.5 px-2 w-10 text-center border-r border-emerald-800/60" title="Pilih / Check"></th>
-                <th className="py-2.5 px-2 w-16 text-center border-r border-emerald-800/60 font-mono">No</th>
-                <th className="py-2.5 px-3 w-[360px] border-r border-emerald-800/60">WORK ITEMS / SKEMA STRUKTUR HIERARKI</th>
-                <th className="py-2.5 px-3 w-[180px] border-r border-emerald-800/60">Keterangan</th>
-                <th className="py-2.5 px-2 w-24 text-center border-r border-emerald-800/60 font-mono">Type</th>
-                <th className="py-2.5 px-2 w-14 text-center border-r border-emerald-800/60 font-mono" title="Dimensi 1 (Panjang/Diameter mm)">D1</th>
-                <th className="py-2.5 px-2 w-14 text-center border-r border-emerald-800/60 font-mono" title="Dimensi 2 (Lebar/Sayap mm)">D2</th>
-                <th className="py-2.5 px-2 w-14 text-center border-r border-emerald-800/60 font-mono" title="Dimensi 3 (Tebal mm)">D3</th>
-                <th className="py-2.5 px-2 w-20 text-center bg-[#07593D] text-amber-300 border-x-2 border-amber-400/70 font-mono font-extrabold shadow-inner" title="Ukuran panjang siku, pipa, h-beam, round bar, flat bar & square bar (mm)">Panjang</th>
-                <th className="py-2.5 px-2 w-14 text-center border-r border-emerald-800/60 font-mono" title="Dimensi 4 (Pengali/Pcs)">D4</th>
-                <th className="py-2.5 px-2 w-20 text-right border-r border-emerald-800/60 font-mono" title="Volume / Kuantitas">Qty</th>
-                <th className="py-2.5 px-2 w-20 text-center border-r border-emerald-800/60 font-mono" title="Satuan (Unit)">Satuan</th>
-                <th className="py-2.5 px-3 w-[160px] text-left border-r border-emerald-800/60 font-mono" title="Catatan / Status / Remark">Remark</th>
-                <th className="py-2.5 px-2 w-44 shrink-0 text-center">
+                <th className="py-2.5 px-2 w-10 min-w-[40px] whitespace-nowrap text-center border-r border-emerald-800/60" title="Pilih / Check"></th>
+                <th className="py-2.5 px-2 w-16 min-w-[64px] whitespace-nowrap text-center border-r border-emerald-800/60 font-mono">No</th>
+                <th className="py-2.5 px-3 w-[360px] min-w-[360px] whitespace-nowrap border-r border-emerald-800/60">WORK ITEMS / SKEMA STRUKTUR HIERARKI</th>
+                <th className="py-2.5 px-3 w-[180px] min-w-[180px] whitespace-nowrap border-r border-emerald-800/60">Keterangan</th>
+                <th className="py-2.5 px-2 w-24 min-w-[96px] whitespace-nowrap text-center border-r border-emerald-800/60 font-mono">Type</th>
+                <th className="py-2.5 px-2 w-16 min-w-[64px] whitespace-nowrap text-center border-r border-emerald-800/60 font-mono" title="Dimensi 1 (Panjang/Diameter mm)">D1</th>
+                <th className="py-2.5 px-2 w-16 min-w-[64px] whitespace-nowrap text-center border-r border-emerald-800/60 font-mono" title="Dimensi 2 (Lebar/Sayap mm)">D2</th>
+                <th className="py-2.5 px-2 w-16 min-w-[64px] whitespace-nowrap text-center border-r border-emerald-800/60 font-mono" title="Dimensi 3 (Tebal mm)">D3</th>
+                <th className="py-2.5 px-2 w-[88px] min-w-[88px] whitespace-nowrap text-center bg-[#07593D] text-amber-300 border-x-2 border-amber-400/70 font-mono font-extrabold shadow-inner" title="Ukuran panjang siku, pipa, h-beam, round bar, flat bar & square bar (mm)">Panjang</th>
+                <th className="py-2.5 px-2 w-16 min-w-[64px] whitespace-nowrap text-center border-r border-emerald-800/60 font-mono" title="Dimensi 4 (Pengali/Pcs)">D4</th>
+                <th className="py-2.5 px-2 w-[88px] min-w-[88px] whitespace-nowrap text-right border-r border-emerald-800/60 font-mono" title="Volume / Kuantitas">Qty</th>
+                <th className="py-2.5 px-2 w-[84px] min-w-[84px] whitespace-nowrap text-center border-r border-emerald-800/60 font-mono" title="Satuan (Unit)">Satuan</th>
+                <th className="py-2.5 px-3 w-[160px] min-w-[160px] whitespace-nowrap text-left border-r border-emerald-800/60 font-mono" title="Catatan / Status / Remark">Remark</th>
+                <th className="py-2.5 px-2 w-44 min-w-[176px] whitespace-nowrap shrink-0 text-center">
                   <div className="flex items-center justify-between px-1">
-                    <span className="leading-tight text-emerald-100 font-bold">Aksi &amp; Tambah</span>
+                    <span className="leading-tight text-emerald-100 font-bold whitespace-nowrap">Aksi &amp; Tambah</span>
                     <button
                       onClick={() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' })}
-                      className="px-1.5 py-0.5 text-[9px] font-semibold text-emerald-100 hover:text-white hover:bg-emerald-700/80 rounded border border-emerald-600/70 bg-emerald-800/60 transition-colors cursor-pointer inline-flex items-center gap-0.5 shadow-2xs"
+                      className="px-1.5 py-0.5 text-[9px] font-semibold text-emerald-100 hover:text-white hover:bg-emerald-700/80 rounded border border-emerald-600/70 bg-emerald-800/60 transition-colors cursor-pointer inline-flex items-center gap-0.5 shadow-2xs whitespace-nowrap"
                       title="Gulir ke bagian paling bawah tabel"
                     >
                       <span>&darr;</span>
@@ -2597,7 +2669,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                       : 'bg-slate-100/90 hover:bg-slate-200/80'
                                   }`}
                                 >
-                                  <td className="py-2 px-2 text-center border-r border-slate-200">
+                                  <td className="py-2 px-2 w-10 min-w-[40px] whitespace-nowrap text-center border-r border-slate-200">
                                     <div className="flex items-center justify-center gap-1">
                                       <span
                                         draggable={true}
@@ -2623,7 +2695,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                     editingCell={spreadsheet.editingCell}
                                     editValue={spreadsheet.editValue}
                                     align="center"
-                                    className="text-slate-800 font-extrabold text-xs border-r border-slate-200 font-mono"
+                                    className="w-16 min-w-[64px] whitespace-nowrap text-slate-800 font-extrabold text-xs border-r border-slate-200 font-mono"
                                     onSelectCell={spreadsheet.setActiveCell}
                                     onStartEdit={spreadsheet.startEditing}
                                     onEditChange={spreadsheet.setEditValue}
@@ -2643,7 +2715,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                     editingCell={spreadsheet.editingCell}
                                     editValue={spreadsheet.editValue}
                                     align="left"
-                                    className="border-r border-slate-200 min-w-[280px]"
+                                    className="border-r border-slate-200 w-[360px] min-w-[360px] whitespace-nowrap"
                                     onSelectCell={spreadsheet.setActiveCell}
                                     onStartEdit={spreadsheet.startEditing}
                                     onEditChange={spreadsheet.setEditValue}
@@ -2654,7 +2726,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                       spreadsheet.setContextMenu({ x: e.clientX, y: e.clientY, item: area, field: f });
                                     }}
                                     displayFormatter={(val) => (
-                                      <div className="flex items-center gap-2">
+                                      <div className="flex items-center gap-2 min-w-0 w-full">
                                         <button
                                           onClick={(e) => {
                                             e.stopPropagation();
@@ -2664,7 +2736,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                         >
                                           {isAreaCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                                         </button>
-                                        <span className="font-extrabold text-slate-900 text-xs tracking-wide">
+                                        <span className="font-extrabold text-slate-900 text-xs tracking-wide truncate">
                                           {val}
                                         </span>
                                       </div>
@@ -2678,7 +2750,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                     editingCell={spreadsheet.editingCell}
                                     editValue={spreadsheet.editValue}
                                     align="left"
-                                    className="text-slate-600 text-[11px] font-normal min-w-[140px] border-r border-slate-200"
+                                    className="text-slate-600 text-[11px] font-normal w-[180px] min-w-[180px] whitespace-nowrap border-r border-slate-200"
                                     onSelectCell={spreadsheet.setActiveCell}
                                     onStartEdit={spreadsheet.startEditing}
                                     onEditChange={spreadsheet.setEditValue}
@@ -2698,7 +2770,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                     editingCell={spreadsheet.editingCell}
                                     editValue={spreadsheet.editValue}
                                     align="center"
-                                    className="font-mono text-slate-600 text-[11px] border-r border-slate-200 font-bold uppercase"
+                                    className="w-24 min-w-[96px] whitespace-nowrap font-mono text-slate-600 text-[11px] border-r border-slate-200 font-bold uppercase"
                                     onSelectCell={spreadsheet.setActiveCell}
                                     onStartEdit={spreadsheet.startEditing}
                                     onEditChange={spreadsheet.setEditValue}
@@ -2718,7 +2790,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                     editingCell={spreadsheet.editingCell}
                                     editValue={spreadsheet.editValue}
                                     align="center"
-                                    className="font-mono text-slate-600 text-[11px] border-r border-slate-200 font-bold"
+                                    className="w-16 min-w-[64px] whitespace-nowrap font-mono text-slate-600 text-[11px] border-r border-slate-200 font-bold"
                                     onSelectCell={spreadsheet.setActiveCell}
                                     onStartEdit={spreadsheet.startEditing}
                                     onEditChange={spreadsheet.setEditValue}
@@ -2738,7 +2810,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                     editingCell={spreadsheet.editingCell}
                                     editValue={spreadsheet.editValue}
                                     align="center"
-                                    className="font-mono text-slate-600 text-[11px] border-r border-slate-200 font-bold"
+                                    className="w-16 min-w-[64px] whitespace-nowrap font-mono text-slate-600 text-[11px] border-r border-slate-200 font-bold"
                                     onSelectCell={spreadsheet.setActiveCell}
                                     onStartEdit={spreadsheet.startEditing}
                                     onEditChange={spreadsheet.setEditValue}
@@ -2758,7 +2830,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                     editingCell={spreadsheet.editingCell}
                                     editValue={spreadsheet.editValue}
                                     align="center"
-                                    className="font-mono text-slate-600 text-[11px] border-r border-slate-200 font-bold"
+                                    className="w-16 min-w-[64px] whitespace-nowrap font-mono text-slate-600 text-[11px] border-r border-slate-200 font-bold"
                                     onSelectCell={spreadsheet.setActiveCell}
                                     onStartEdit={spreadsheet.startEditing}
                                     onEditChange={spreadsheet.setEditValue}
@@ -2778,7 +2850,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                     editingCell={spreadsheet.editingCell}
                                     editValue={spreadsheet.editValue}
                                     align="center"
-                                    className="font-mono text-amber-900 font-bold bg-amber-50/50 text-[11px] border-x-2 border-amber-300/70"
+                                    className="w-[88px] min-w-[88px] whitespace-nowrap font-mono text-amber-900 font-bold bg-amber-50/50 text-[11px] border-x-2 border-amber-300/70"
                                     onSelectCell={spreadsheet.setActiveCell}
                                     onStartEdit={spreadsheet.startEditing}
                                     onEditChange={spreadsheet.setEditValue}
@@ -2800,7 +2872,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                     editingCell={spreadsheet.editingCell}
                                     editValue={spreadsheet.editValue}
                                     align="center"
-                                    className="font-mono text-slate-600 text-[11px] border-r border-slate-200 font-bold"
+                                    className="w-16 min-w-[64px] whitespace-nowrap font-mono text-slate-600 text-[11px] border-r border-slate-200 font-bold"
                                     onSelectCell={spreadsheet.setActiveCell}
                                     onStartEdit={spreadsheet.startEditing}
                                     onEditChange={spreadsheet.setEditValue}
@@ -2823,7 +2895,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                      editingCell={spreadsheet.editingCell}
                                      editValue={spreadsheet.editValue}
                                      align="right"
-                                     className="border-r border-slate-200 w-20 font-bold font-mono"
+                                     className="border-r border-slate-200 w-[88px] min-w-[88px] whitespace-nowrap font-bold font-mono"
                                      onSelectCell={spreadsheet.setActiveCell}
                                      onStartEdit={spreadsheet.startEditing}
                                      onEditChange={spreadsheet.setEditValue}
@@ -2849,7 +2921,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                      editingCell={spreadsheet.editingCell}
                                      editValue={spreadsheet.editValue}
                                      align="center"
-                                     className="border-r border-slate-200 w-20 font-mono text-xs font-bold text-slate-600 bg-slate-50/40"
+                                     className="border-r border-slate-200 w-[84px] min-w-[84px] whitespace-nowrap font-mono text-xs font-bold text-slate-600 bg-slate-50/40"
                                      onSelectCell={spreadsheet.setActiveCell}
                                      onStartEdit={spreadsheet.startEditing}
                                      onEditChange={spreadsheet.setEditValue}
@@ -2870,7 +2942,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                     editingCell={spreadsheet.editingCell}
                                     editValue={spreadsheet.editValue}
                                     align="left"
-                                    className="text-slate-600 text-[11px] font-normal min-w-[130px] w-36 border-r border-slate-200"
+                                    className="text-slate-600 text-[11px] font-normal w-[160px] min-w-[160px] whitespace-nowrap border-r border-slate-200"
                                     onSelectCell={spreadsheet.setActiveCell}
                                     onStartEdit={spreadsheet.startEditing}
                                     onEditChange={spreadsheet.setEditValue}
@@ -2882,11 +2954,11 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                     }}
                                   />
 
-                                  <td className="py-2 px-2 text-center">
+                                  <td className="py-2 px-2 w-44 min-w-[176px] whitespace-nowrap text-center">
                                     <div className="flex items-center justify-center gap-1.5 min-w-[160px]">
                                       <button
                                         onClick={() => openAddModalForLevel(category.id, 2, area)}
-                                        className="px-2.5 py-1 bg-[#03442C] hover:bg-[#04593A] text-white text-[10px] font-bold rounded-md shadow-2xs inline-flex items-center gap-1 cursor-pointer shrink-0 transition-colors"
+                                        className="px-2.5 py-1 bg-[#03442C] hover:bg-[#04593A] text-white text-[10px] font-bold rounded-md shadow-2xs inline-flex items-center gap-1 cursor-pointer shrink-0 transition-colors whitespace-nowrap"
                                         title="Tambah Sub-system di bawah Area ini"
                                       >
                                         <Plus className="w-3 h-3 text-amber-300" />
@@ -3046,7 +3118,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                                 : 'bg-emerald-50/60 hover:bg-emerald-100/50'
                                             }`}
                                           >
-                                            <td className="py-1.5 px-2 text-center border-r border-slate-200">
+                                            <td className="py-1.5 px-2 w-10 min-w-[40px] whitespace-nowrap text-center border-r border-slate-200">
                                               <div className="flex items-center justify-center gap-1">
                                                 <span
                                                   draggable={true}
@@ -3072,7 +3144,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                               editingCell={spreadsheet.editingCell}
                                               editValue={spreadsheet.editValue}
                                               align="center"
-                                              className="text-emerald-900 font-bold text-xs border-r border-slate-200 font-mono"
+                                              className="w-16 min-w-[64px] whitespace-nowrap text-emerald-900 font-bold text-xs border-r border-slate-200 font-mono"
                                               onSelectCell={spreadsheet.setActiveCell}
                                               onStartEdit={spreadsheet.startEditing}
                                               onEditChange={spreadsheet.setEditValue}
@@ -3092,7 +3164,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                               editingCell={spreadsheet.editingCell}
                                               editValue={spreadsheet.editValue}
                                               align="left"
-                                              className="border-r border-slate-200 min-w-[280px]"
+                                              className="border-r border-slate-200 w-[360px] min-w-[360px] whitespace-nowrap"
                                               onSelectCell={spreadsheet.setActiveCell}
                                               onStartEdit={spreadsheet.startEditing}
                                               onEditChange={spreadsheet.setEditValue}
@@ -3103,7 +3175,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                                 spreadsheet.setContextMenu({ x: e.clientX, y: e.clientY, item: subSystem, field: f });
                                               }}
                                               displayFormatter={(val) => (
-                                                <div className="flex items-center gap-2 pl-3">
+                                                <div className="flex items-center gap-2 pl-3 min-w-0 w-full">
                                                   {subComponents.length > 0 ? (
                                                     <button
                                                       onClick={(e) => {
@@ -3118,7 +3190,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                                     <div className="w-4.5 h-4.5 shrink-0" />
                                                   )}
                                                   
-                                                  <span className="font-bold text-xs shrink-0 text-slate-800">
+                                                  <span className="font-bold text-xs truncate text-slate-800">
                                                     {val}
                                                   </span>
                                                 </div>
@@ -3132,7 +3204,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                               editingCell={spreadsheet.editingCell}
                                               editValue={spreadsheet.editValue}
                                               align="left"
-                                              className="text-slate-600 text-[11px] min-w-[140px] border-r border-slate-200"
+                                              className="text-slate-600 text-[11px] w-[180px] min-w-[180px] whitespace-nowrap border-r border-slate-200"
                                               onSelectCell={spreadsheet.setActiveCell}
                                               onStartEdit={spreadsheet.startEditing}
                                               onEditChange={spreadsheet.setEditValue}
@@ -3153,7 +3225,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                               editingCell={spreadsheet.editingCell}
                                               editValue={spreadsheet.editValue}
                                               align="center"
-                                              className="font-mono text-slate-600 text-[11px] border-r border-slate-200 font-bold uppercase"
+                                              className="w-24 min-w-[96px] whitespace-nowrap font-mono text-slate-600 text-[11px] border-r border-slate-200 font-bold uppercase"
                                               onSelectCell={spreadsheet.setActiveCell}
                                               onStartEdit={spreadsheet.startEditing}
                                               onEditChange={spreadsheet.setEditValue}
@@ -3173,7 +3245,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                               editingCell={spreadsheet.editingCell}
                                               editValue={spreadsheet.editValue}
                                               align="center"
-                                              className="font-mono text-slate-600 text-[11px] border-r border-slate-200 font-bold"
+                                              className="w-16 min-w-[64px] whitespace-nowrap font-mono text-slate-600 text-[11px] border-r border-slate-200 font-bold"
                                               onSelectCell={spreadsheet.setActiveCell}
                                               onStartEdit={spreadsheet.startEditing}
                                               onEditChange={spreadsheet.setEditValue}
@@ -3193,7 +3265,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                               editingCell={spreadsheet.editingCell}
                                               editValue={spreadsheet.editValue}
                                               align="center"
-                                              className="font-mono text-slate-600 text-[11px] border-r border-slate-200 font-bold"
+                                              className="w-16 min-w-[64px] whitespace-nowrap font-mono text-slate-600 text-[11px] border-r border-slate-200 font-bold"
                                               onSelectCell={spreadsheet.setActiveCell}
                                               onStartEdit={spreadsheet.startEditing}
                                               onEditChange={spreadsheet.setEditValue}
@@ -3213,7 +3285,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                               editingCell={spreadsheet.editingCell}
                                               editValue={spreadsheet.editValue}
                                               align="center"
-                                              className="font-mono text-slate-600 text-[11px] border-r border-slate-200 font-bold"
+                                              className="w-16 min-w-[64px] whitespace-nowrap font-mono text-slate-600 text-[11px] border-r border-slate-200 font-bold"
                                               onSelectCell={spreadsheet.setActiveCell}
                                               onStartEdit={spreadsheet.startEditing}
                                               onEditChange={spreadsheet.setEditValue}
@@ -3233,7 +3305,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                               editingCell={spreadsheet.editingCell}
                                               editValue={spreadsheet.editValue}
                                               align="center"
-                                              className="font-mono text-amber-900 font-bold bg-amber-50/50 text-[11px] border-x-2 border-amber-300/70"
+                                              className="w-[88px] min-w-[88px] whitespace-nowrap font-mono text-amber-900 font-bold bg-amber-50/50 text-[11px] border-x-2 border-amber-300/70"
                                               onSelectCell={spreadsheet.setActiveCell}
                                               onStartEdit={spreadsheet.startEditing}
                                               onEditChange={spreadsheet.setEditValue}
@@ -3253,7 +3325,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                               editingCell={spreadsheet.editingCell}
                                               editValue={spreadsheet.editValue}
                                               align="center"
-                                              className="font-mono text-slate-600 text-[11px] border-r border-slate-200 font-bold"
+                                              className="w-16 min-w-[64px] whitespace-nowrap font-mono text-slate-600 text-[11px] border-r border-slate-200 font-bold"
                                               onSelectCell={spreadsheet.setActiveCell}
                                               onStartEdit={spreadsheet.startEditing}
                                               onEditChange={spreadsheet.setEditValue}
@@ -3274,7 +3346,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                      editingCell={spreadsheet.editingCell}
                                      editValue={spreadsheet.editValue}
                                      align="right"
-                                     className="border-r border-slate-200 w-20 font-bold font-mono"
+                                     className="border-r border-slate-200 w-[88px] min-w-[88px] whitespace-nowrap font-bold font-mono"
                                      onSelectCell={spreadsheet.setActiveCell}
                                      onStartEdit={spreadsheet.startEditing}
                                      onEditChange={spreadsheet.setEditValue}
@@ -3300,7 +3372,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                      editingCell={spreadsheet.editingCell}
                                      editValue={spreadsheet.editValue}
                                      align="center"
-                                     className="border-r border-slate-200 w-20 font-mono text-xs font-bold text-slate-600 bg-slate-50/40"
+                                     className="border-r border-slate-200 w-[84px] min-w-[84px] whitespace-nowrap font-mono text-xs font-bold text-slate-600 bg-slate-50/40"
                                      onSelectCell={spreadsheet.setActiveCell}
                                      onStartEdit={spreadsheet.startEditing}
                                      onEditChange={spreadsheet.setEditValue}
@@ -3321,7 +3393,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                               editingCell={spreadsheet.editingCell}
                                               editValue={spreadsheet.editValue}
                                               align="left"
-                                              className="text-slate-600 text-[11px] font-normal min-w-[130px] w-36 border-r border-slate-200"
+                                              className="text-slate-600 text-[11px] font-normal w-[160px] min-w-[160px] whitespace-nowrap border-r border-slate-200"
                                               onSelectCell={spreadsheet.setActiveCell}
                                               onStartEdit={spreadsheet.startEditing}
                                               onEditChange={spreadsheet.setEditValue}
@@ -3333,11 +3405,11 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                               }}
                                             />
                                             
-                                            <td className="py-1.5 px-2 text-center">
+                                            <td className="py-1.5 px-2 w-44 min-w-[176px] whitespace-nowrap text-center">
                                               <div className="flex items-center justify-center gap-1.5 min-w-[160px]">
                                                 <button
                                                   onClick={() => openAddModalForLevel(category.id, 3, subSystem)}
-                                                  className="px-2.5 py-1 bg-[#046A45] hover:bg-[#058456] text-white text-[10px] font-bold rounded-md shadow-2xs inline-flex items-center gap-1 cursor-pointer shrink-0 transition-colors"
+                                                  className="px-2.5 py-1 bg-[#046A45] hover:bg-[#058456] text-white text-[10px] font-bold rounded-md shadow-2xs inline-flex items-center gap-1 cursor-pointer shrink-0 transition-colors whitespace-nowrap"
                                                   title="Tambah Detail Komponen di bawah Sub-system ini"
                                                 >
                                                   <Plus className="w-3 h-3 text-amber-300" />
@@ -3540,7 +3612,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                       : 'bg-emerald-50/40 hover:bg-emerald-100/50'
                                   }`}
                                 >
-                                  <td className="py-1.5 px-3 text-center border-r border-slate-200">
+                                  <td className="py-1.5 px-3 w-10 min-w-[40px] whitespace-nowrap text-center border-r border-slate-200">
                                     <input
                                       type="checkbox"
                                       checked={selectedItemIds.has(subSystem.id)}
@@ -3556,7 +3628,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                     editingCell={spreadsheet.editingCell}
                                     editValue={spreadsheet.editValue}
                                     align="center"
-                                    className="text-emerald-900 font-bold text-xs border-r border-slate-200 font-mono"
+                                    className="w-16 min-w-[64px] whitespace-nowrap text-emerald-900 font-bold text-xs border-r border-slate-200 font-mono"
                                     onSelectCell={spreadsheet.setActiveCell}
                                     onStartEdit={spreadsheet.startEditing}
                                     onEditChange={spreadsheet.setEditValue}
@@ -3576,7 +3648,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                     editingCell={spreadsheet.editingCell}
                                     editValue={spreadsheet.editValue}
                                     align="left"
-                                    className="border-r border-slate-200 min-w-[280px]"
+                                    className="border-r border-slate-200 w-[360px] min-w-[360px] whitespace-nowrap"
                                     onSelectCell={spreadsheet.setActiveCell}
                                     onStartEdit={spreadsheet.startEditing}
                                     onEditChange={spreadsheet.setEditValue}
@@ -3587,7 +3659,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                       spreadsheet.setContextMenu({ x: e.clientX, y: e.clientY, item: subSystem, field: f });
                                     }}
                                     displayFormatter={(val) => (
-                                      <div className="flex items-center gap-2 pl-3">
+                                      <div className="flex items-center gap-2 pl-3 min-w-0 w-full">
                                         {subComponents.length > 0 ? (
                                           <button
                                             onClick={(e) => {
@@ -3601,7 +3673,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                         ) : (
                                           <div className="w-4.5 h-4.5 shrink-0" />
                                         )}
-                                        <span className="font-bold text-xs shrink-0 text-slate-800">
+                                        <span className="font-bold text-xs truncate text-slate-800">
                                           {val}
                                         </span>
                                       </div>
@@ -3615,7 +3687,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                     editingCell={spreadsheet.editingCell}
                                     editValue={spreadsheet.editValue}
                                     align="left"
-                                    className="text-slate-600 text-[11px] min-w-[140px] border-r border-slate-200"
+                                    className="text-slate-600 text-[11px] w-[180px] min-w-[180px] whitespace-nowrap border-r border-slate-200"
                                     onSelectCell={spreadsheet.setActiveCell}
                                     onStartEdit={spreadsheet.startEditing}
                                     onEditChange={spreadsheet.setEditValue}
@@ -3635,7 +3707,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                     editingCell={spreadsheet.editingCell}
                                     editValue={spreadsheet.editValue}
                                     align="center"
-                                    className="font-mono text-slate-600 text-[11px] border-r border-slate-200 font-bold uppercase"
+                                    className="w-24 min-w-[96px] whitespace-nowrap font-mono text-slate-600 text-[11px] border-r border-slate-200 font-bold uppercase"
                                     onSelectCell={spreadsheet.setActiveCell}
                                     onStartEdit={spreadsheet.startEditing}
                                     onEditChange={spreadsheet.setEditValue}
@@ -3654,7 +3726,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                     editingCell={spreadsheet.editingCell}
                                     editValue={spreadsheet.editValue}
                                     align="center"
-                                    className="font-mono text-slate-600 text-[11px] border-r border-slate-200 font-bold"
+                                    className="w-16 min-w-[64px] whitespace-nowrap font-mono text-slate-600 text-[11px] border-r border-slate-200 font-bold"
                                     onSelectCell={spreadsheet.setActiveCell}
                                     onStartEdit={spreadsheet.startEditing}
                                     onEditChange={spreadsheet.setEditValue}
@@ -3673,7 +3745,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                     editingCell={spreadsheet.editingCell}
                                     editValue={spreadsheet.editValue}
                                     align="center"
-                                    className="font-mono text-slate-600 text-[11px] border-r border-slate-200 font-bold"
+                                    className="w-16 min-w-[64px] whitespace-nowrap font-mono text-slate-600 text-[11px] border-r border-slate-200 font-bold"
                                     onSelectCell={spreadsheet.setActiveCell}
                                     onStartEdit={spreadsheet.startEditing}
                                     onEditChange={spreadsheet.setEditValue}
@@ -3692,7 +3764,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                     editingCell={spreadsheet.editingCell}
                                     editValue={spreadsheet.editValue}
                                     align="center"
-                                    className="font-mono text-slate-600 text-[11px] border-r border-slate-200 font-bold"
+                                    className="w-16 min-w-[64px] whitespace-nowrap font-mono text-slate-600 text-[11px] border-r border-slate-200 font-bold"
                                     onSelectCell={spreadsheet.setActiveCell}
                                     onStartEdit={spreadsheet.startEditing}
                                     onEditChange={spreadsheet.setEditValue}
@@ -3711,7 +3783,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                     editingCell={spreadsheet.editingCell}
                                     editValue={spreadsheet.editValue}
                                     align="center"
-                                    className="font-mono text-amber-900 font-bold bg-amber-50/50 text-[11px] border-x-2 border-amber-300/70"
+                                    className="w-[88px] min-w-[88px] whitespace-nowrap font-mono text-amber-900 font-bold bg-amber-50/50 text-[11px] border-x-2 border-amber-300/70"
                                     onSelectCell={spreadsheet.setActiveCell}
                                     onStartEdit={spreadsheet.startEditing}
                                     onEditChange={spreadsheet.setEditValue}
@@ -3730,7 +3802,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                     editingCell={spreadsheet.editingCell}
                                     editValue={spreadsheet.editValue}
                                     align="center"
-                                    className="font-mono text-slate-600 text-[11px] border-r border-slate-200 font-bold"
+                                    className="w-16 min-w-[64px] whitespace-nowrap font-mono text-slate-600 text-[11px] border-r border-slate-200 font-bold"
                                     onSelectCell={spreadsheet.setActiveCell}
                                     onStartEdit={spreadsheet.startEditing}
                                     onEditChange={spreadsheet.setEditValue}
@@ -3750,7 +3822,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                      editingCell={spreadsheet.editingCell}
                                      editValue={spreadsheet.editValue}
                                      align="right"
-                                     className="border-r border-slate-200 w-20 font-bold font-mono"
+                                     className="border-r border-slate-200 w-[88px] min-w-[88px] whitespace-nowrap font-bold font-mono"
                                      onSelectCell={spreadsheet.setActiveCell}
                                      onStartEdit={spreadsheet.startEditing}
                                      onEditChange={spreadsheet.setEditValue}
@@ -3776,7 +3848,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                      editingCell={spreadsheet.editingCell}
                                      editValue={spreadsheet.editValue}
                                      align="center"
-                                     className="border-r border-slate-200 w-20 font-mono text-xs font-bold text-slate-600 bg-slate-50/40"
+                                     className="border-r border-slate-200 w-[84px] min-w-[84px] whitespace-nowrap font-mono text-xs font-bold text-slate-600 bg-slate-50/40"
                                      onSelectCell={spreadsheet.setActiveCell}
                                      onStartEdit={spreadsheet.startEditing}
                                      onEditChange={spreadsheet.setEditValue}
@@ -3797,7 +3869,7 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                     editingCell={spreadsheet.editingCell}
                                     editValue={spreadsheet.editValue}
                                     align="left"
-                                    className="text-slate-600 text-[11px] font-normal min-w-[130px] w-36 border-r border-slate-200"
+                                    className="text-slate-600 text-[11px] font-normal w-[160px] min-w-[160px] whitespace-nowrap border-r border-slate-200"
                                     onSelectCell={spreadsheet.setActiveCell}
                                     onStartEdit={spreadsheet.startEditing}
                                     onEditChange={spreadsheet.setEditValue}
@@ -3809,11 +3881,11 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
                                     }}
                                   />
                                   
-                                  <td className="py-1.5 px-2 text-center">
+                                  <td className="py-1.5 px-2 w-44 min-w-[176px] whitespace-nowrap text-center">
                                     <div className="flex items-center justify-center gap-1">
                                       <button
                                         onClick={() => openAddModalForLevel(category.id, 3, subSystem)}
-                                        className="px-2 py-0.5 bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-bold rounded flex items-center gap-1 cursor-pointer"
+                                        className="px-2 py-0.5 bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-bold rounded flex items-center gap-1 cursor-pointer whitespace-nowrap"
                                         title="Tambah Detail Komponen (Bracket, Stiffener, Frame, dll) di bawah Sub-system ini"
                                       >
                                         <Plus className="w-3 h-3" />
@@ -3920,8 +3992,16 @@ export const RepairListTable: React.FC<RepairListTableProps> = React.memo(({
             )}
             </tbody>
           </table>
-          </SortableContext>
-        </DndContext>
+            </SortableContext>
+            </DndContext>
+          </div>
+          {/* Subtle right-side scroll-hint shadow when content overflows container width */}
+          <div
+            aria-hidden="true"
+            className={`scroll-hint pointer-events-none absolute inset-y-0 right-0 z-20 w-8 sm:w-10 transition-opacity duration-200 ${
+              canScrollRight ? 'opacity-100' : 'opacity-0'
+            }`}
+          />
         </div>
 
         {/* Bottom Summary Bar: Total Tonase Baja */}
@@ -4998,7 +5078,7 @@ const CategoryBlankRow: React.FC<CategoryBlankRowProps> = ({
           : 'bg-gradient-to-r from-emerald-50/90 via-emerald-50/50 to-teal-50/80 border-t-2 border-b-2 border-dashed border-emerald-400/90 hover:border-emerald-500 hover:bg-emerald-50/95'
       }`}
     >
-      <td className="py-2 px-2 text-center border-r border-emerald-300/80">
+      <td className="py-2 px-2 w-10 min-w-[40px] whitespace-nowrap text-center border-r border-emerald-300/80">
         <div className="flex flex-col items-center justify-center gap-0.5">
           <span
             className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-extrabold uppercase tracking-tight shadow-2xs transition-colors duration-100 ${
@@ -5014,7 +5094,7 @@ const CategoryBlankRow: React.FC<CategoryBlankRowProps> = ({
         </div>
       </td>
 
-      <td className="py-2 px-1 text-center border-r border-emerald-300/80 font-mono text-[11px] w-14">
+      <td className="py-2 px-1 text-center border-r border-emerald-300/80 font-mono text-[11px] w-16 min-w-[64px] whitespace-nowrap">
         <input
           type="text"
           value={itemNo}
@@ -5026,7 +5106,7 @@ const CategoryBlankRow: React.FC<CategoryBlankRowProps> = ({
         />
       </td>
 
-      <td className="py-2 px-3 border-r border-emerald-300/80 min-w-[280px]">
+      <td className="py-2 px-3 border-r border-emerald-300/80 w-[360px] min-w-[360px] whitespace-nowrap">
         <input
           type="text"
           value={description}
@@ -5037,7 +5117,7 @@ const CategoryBlankRow: React.FC<CategoryBlankRowProps> = ({
         />
       </td>
 
-      <td className="py-2 px-2 border-r border-emerald-200 min-w-[140px]">
+      <td className="py-2 px-2 border-r border-emerald-200 w-[180px] min-w-[180px] whitespace-nowrap">
         <input
           type="text"
           value={notes}
@@ -5048,7 +5128,7 @@ const CategoryBlankRow: React.FC<CategoryBlankRowProps> = ({
         />
       </td>
 
-      <td className="py-2 px-1 border-r border-emerald-200 text-center w-24">
+      <td className="py-2 px-1 border-r border-emerald-200 text-center w-24 min-w-[96px] whitespace-nowrap">
         <select
           value={type}
           onChange={(e) => setType(e.target.value)}
@@ -5063,7 +5143,7 @@ const CategoryBlankRow: React.FC<CategoryBlankRowProps> = ({
         </select>
       </td>
 
-      <td className="py-2 px-1 border-r border-emerald-200 w-14 text-center">
+      <td className="py-2 px-1 border-r border-emerald-200 w-16 min-w-[64px] whitespace-nowrap text-center">
         <input
           type="text"
           value={d1}
@@ -5074,7 +5154,7 @@ const CategoryBlankRow: React.FC<CategoryBlankRowProps> = ({
         />
       </td>
 
-      <td className="py-2 px-1 border-r border-emerald-200 w-14 text-center">
+      <td className="py-2 px-1 border-r border-emerald-200 w-16 min-w-[64px] whitespace-nowrap text-center">
         <input
           type="text"
           value={d2}
@@ -5085,7 +5165,7 @@ const CategoryBlankRow: React.FC<CategoryBlankRowProps> = ({
         />
       </td>
 
-      <td className="py-2 px-1 border-r border-emerald-200 w-14 text-center">
+      <td className="py-2 px-1 border-r border-emerald-200 w-16 min-w-[64px] whitespace-nowrap text-center">
         <input
           type="text"
           value={d3}
@@ -5096,7 +5176,7 @@ const CategoryBlankRow: React.FC<CategoryBlankRowProps> = ({
         />
       </td>
 
-      <td className="py-2 px-1 border-r-2 border-amber-400 bg-amber-50/80 w-16 text-center">
+      <td className="py-2 px-1 border-r-2 border-amber-400 bg-amber-50/80 w-[88px] min-w-[88px] whitespace-nowrap text-center">
         <input
           type="text"
           value={dLen}
@@ -5107,7 +5187,7 @@ const CategoryBlankRow: React.FC<CategoryBlankRowProps> = ({
         />
       </td>
 
-      <td className="py-2 px-1 border-r border-emerald-200 w-14 text-center">
+      <td className="py-2 px-1 border-r border-emerald-200 w-16 min-w-[64px] whitespace-nowrap text-center">
         <input
           type="text"
           value={d4}
@@ -5118,7 +5198,7 @@ const CategoryBlankRow: React.FC<CategoryBlankRowProps> = ({
         />
       </td>
 
-      <td className="py-2 px-1 border-r border-emerald-200 w-20 text-right">
+      <td className="py-2 px-1 border-r border-emerald-200 w-[88px] min-w-[88px] whitespace-nowrap text-right">
         <input
           type="text"
           value={qty}
@@ -5129,7 +5209,7 @@ const CategoryBlankRow: React.FC<CategoryBlankRowProps> = ({
         />
       </td>
 
-      <td className="py-2 px-1 border-r border-emerald-200 w-20 text-center">
+      <td className="py-2 px-1 border-r border-emerald-200 w-[84px] min-w-[84px] whitespace-nowrap text-center">
         <select
           value={unit}
           onChange={(e) => setUnit(e.target.value)}
@@ -5150,7 +5230,7 @@ const CategoryBlankRow: React.FC<CategoryBlankRowProps> = ({
         </select>
       </td>
 
-      <td className="py-2 px-2 border-r border-emerald-200 min-w-[130px]">
+      <td className="py-2 px-2 border-r border-emerald-200 w-[160px] min-w-[160px] whitespace-nowrap">
         <input
           type="text"
           value={remark}
@@ -5161,12 +5241,12 @@ const CategoryBlankRow: React.FC<CategoryBlankRowProps> = ({
         />
       </td>
 
-      <td className="py-2 px-2 text-center">
+      <td className="py-2 px-2 w-44 min-w-[176px] whitespace-nowrap text-center">
         <div className="flex items-center justify-center gap-1.5 min-w-[150px]">
           <button
             type="button"
             onClick={handleAdd}
-            className="px-3 py-1.5 bg-[#03442C] hover:bg-[#04593A] text-white font-extrabold text-xs rounded-lg shadow-2xs transition-colors flex items-center gap-1 cursor-pointer shrink-0"
+            className="px-3 py-1.5 bg-[#03442C] hover:bg-[#04593A] text-white font-extrabold text-xs rounded-lg shadow-2xs transition-colors flex items-center gap-1 cursor-pointer shrink-0 whitespace-nowrap"
             title="Tambah item pekerjaan baru ke tabel kategori ini (Enter)"
           >
             <Plus className="w-3.5 h-3.5 text-emerald-300" />
@@ -5236,28 +5316,28 @@ const AreaRow: React.FC<AreaRowProps> = React.memo(({
     const activeLabels = TonnageCalculator.getDimensionLabels(editFormData.type || '');
     return (
       <tr className="bg-amber-50/90 border-t-2 border-amber-400 border-l-4 border-l-amber-600 font-bold shadow-xs transition-colors h-[34px] min-h-[34px]">
-        <td className="py-2 px-3 text-center"></td>
-        <td className="py-2 px-2 text-center min-w-[75px] max-w-[110px]">
+        <td className="py-2 px-3 w-10 min-w-[40px] whitespace-nowrap text-center"></td>
+        <td className="py-2 px-2 w-16 min-w-[64px] whitespace-nowrap text-center">
           <input type="text" value={editFormData.itemNo} onChange={(e) => handleEditFormChange('itemNo', e.target.value)} onKeyDown={handleKeyDown} className="w-full text-center text-xs px-1.5 py-1.5 bg-white border border-amber-400 rounded focus:outline-hidden focus:ring-2 focus:ring-amber-500 font-extrabold font-mono shadow-2xs" />
         </td>
-        <td className="py-2 px-3">
+        <td className="py-2 px-3 w-[360px] min-w-[360px] whitespace-nowrap">
           <input type="text" value={editFormData.description} onChange={(e) => handleEditFormChange('description', e.target.value)} onKeyDown={handleKeyDown} className="w-full text-xs px-2 py-1.5 bg-white border border-slate-300 rounded focus:outline-hidden font-extrabold" />
         </td>
-        <td className="py-2 px-2 min-w-[140px]">
+        <td className="py-2 px-2 w-[180px] min-w-[180px] whitespace-nowrap">
           <input type="text" value={editFormData.notes || ''} onChange={(e) => handleEditFormChange('notes', e.target.value)} onKeyDown={handleKeyDown} className="w-full text-xs px-2 py-1.5 bg-white border border-slate-300 rounded" placeholder="Keterangan Area" />
         </td>
-        <td className="py-2 px-1 align-top w-28 relative">
+        <td className="py-2 px-1 align-top w-24 min-w-[96px] whitespace-nowrap relative">
           <input type="text" value={editFormData.type || ''} onChange={(e) => handleEditFormChange('type', e.target.value)} onKeyDown={handleKeyDown} placeholder="Tipe..." className="w-full text-center text-xs px-2 py-1.5 bg-white border border-emerald-300 rounded focus:outline-hidden font-bold font-mono uppercase" />
         </td>
-        <td className="py-2 px-1 align-top w-12"><input type="text" value={editFormData.d1 || ''} onChange={(e) => handleEditFormChange('d1', e.target.value)} onKeyDown={handleKeyDown} className="w-full text-center font-mono text-xs px-1 py-1.5 bg-white border border-slate-300 rounded" /></td>
-        <td className="py-2 px-1 align-top w-12"><input type="text" value={editFormData.d2 || ''} onChange={(e) => handleEditFormChange('d2', e.target.value)} onKeyDown={handleKeyDown} className="w-full text-center font-mono text-xs px-1 py-1.5 bg-white border border-slate-300 rounded" /></td>
-        <td className="py-2 px-1 align-top w-12"><input type="text" value={editFormData.d3 || ''} onChange={(e) => handleEditFormChange('d3', e.target.value)} onKeyDown={handleKeyDown} className="w-full text-center font-mono text-xs px-1 py-1.5 bg-white border border-slate-300 rounded" /></td>
-        <td className="py-2 px-1 align-top w-14"><input type="text" value={editFormData.dLen || ''} onChange={(e) => handleEditFormChange('dLen', e.target.value)} onKeyDown={handleKeyDown} className="w-full text-center font-mono text-xs px-1 py-1.5 bg-amber-50 border border-amber-300 rounded font-bold text-amber-900" /></td>
-        <td className="py-2 px-1 align-top w-14"><input type="text" value={editFormData.d4 || ''} onChange={(e) => handleEditFormChange('d4', e.target.value)} onKeyDown={handleKeyDown} className="w-full text-center font-mono text-xs px-1 py-1.5 bg-white border border-slate-300 rounded" /></td>
-        <td className="py-1.5 px-1 align-top w-20"><input type="text" value={editFormData.qty ?? ''} onChange={(e) => handleEditFormChange('qty', e.target.value)} onKeyDown={handleKeyDown} className="w-full text-right font-mono font-bold text-xs px-1.5 py-1.5 bg-white border border-slate-300 rounded" placeholder="QTY" /></td>
-        <td className="py-1.5 px-1 align-top w-20"><input type="text" value={editFormData.unit || ''} onChange={(e) => handleEditFormChange('unit', e.target.value)} onKeyDown={handleKeyDown} className="w-full text-center font-mono font-bold text-xs px-1.5 py-1.5 bg-white border border-slate-300 rounded" /></td>
-        <td className="py-2 px-1 align-top min-w-[130px] w-36"><input type="text" value={editFormData.remark || ''} onChange={(e) => handleEditFormChange('remark', e.target.value)} onKeyDown={handleKeyDown} className="w-full text-xs px-2 py-1.5 bg-white border border-slate-300 rounded" /></td>
-        <td className="py-2 px-2 text-center">
+        <td className="py-2 px-1 align-top w-16 min-w-[64px] whitespace-nowrap"><input type="text" value={editFormData.d1 || ''} onChange={(e) => handleEditFormChange('d1', e.target.value)} onKeyDown={handleKeyDown} className="w-full text-center font-mono text-xs px-1 py-1.5 bg-white border border-slate-300 rounded" /></td>
+        <td className="py-2 px-1 align-top w-16 min-w-[64px] whitespace-nowrap"><input type="text" value={editFormData.d2 || ''} onChange={(e) => handleEditFormChange('d2', e.target.value)} onKeyDown={handleKeyDown} className="w-full text-center font-mono text-xs px-1 py-1.5 bg-white border border-slate-300 rounded" /></td>
+        <td className="py-2 px-1 align-top w-16 min-w-[64px] whitespace-nowrap"><input type="text" value={editFormData.d3 || ''} onChange={(e) => handleEditFormChange('d3', e.target.value)} onKeyDown={handleKeyDown} className="w-full text-center font-mono text-xs px-1 py-1.5 bg-white border border-slate-300 rounded" /></td>
+        <td className="py-2 px-1 align-top w-[88px] min-w-[88px] whitespace-nowrap"><input type="text" value={editFormData.dLen || ''} onChange={(e) => handleEditFormChange('dLen', e.target.value)} onKeyDown={handleKeyDown} className="w-full text-center font-mono text-xs px-1 py-1.5 bg-amber-50 border border-amber-300 rounded font-bold text-amber-900" /></td>
+        <td className="py-2 px-1 align-top w-16 min-w-[64px] whitespace-nowrap"><input type="text" value={editFormData.d4 || ''} onChange={(e) => handleEditFormChange('d4', e.target.value)} onKeyDown={handleKeyDown} className="w-full text-center font-mono text-xs px-1 py-1.5 bg-white border border-slate-300 rounded" /></td>
+        <td className="py-1.5 px-1 align-top w-[88px] min-w-[88px] whitespace-nowrap"><input type="text" value={editFormData.qty ?? ''} onChange={(e) => handleEditFormChange('qty', e.target.value)} onKeyDown={handleKeyDown} className="w-full text-right font-mono font-bold text-xs px-1.5 py-1.5 bg-white border border-slate-300 rounded" placeholder="QTY" /></td>
+        <td className="py-1.5 px-1 align-top w-[84px] min-w-[84px] whitespace-nowrap"><input type="text" value={editFormData.unit || ''} onChange={(e) => handleEditFormChange('unit', e.target.value)} onKeyDown={handleKeyDown} className="w-full text-center font-mono font-bold text-xs px-1.5 py-1.5 bg-white border border-slate-300 rounded" /></td>
+        <td className="py-2 px-1 align-top w-[160px] min-w-[160px] whitespace-nowrap"><input type="text" value={editFormData.remark || ''} onChange={(e) => handleEditFormChange('remark', e.target.value)} onKeyDown={handleKeyDown} className="w-full text-xs px-2 py-1.5 bg-white border border-slate-300 rounded" /></td>
+        <td className="py-2 px-2 w-44 min-w-[176px] whitespace-nowrap text-center">
           <div className="flex items-center justify-center gap-1.5">
             <button onClick={saveInlineEdit} className="p-1 bg-emerald-600 text-white hover:bg-emerald-700 rounded shadow-2xs"><Save className="w-3.5 h-3.5" /></button>
             <button onClick={cancelInlineEdit} className="p-1 bg-slate-300 text-slate-700 hover:bg-slate-400 rounded shadow-2xs"><X className="w-3.5 h-3.5" /></button>
@@ -5283,34 +5363,34 @@ const AreaRow: React.FC<AreaRowProps> = React.memo(({
         'bg-slate-100/90 hover:bg-slate-200/80'
       }`}
     >
-      <td className="py-2 px-2 text-center border-r border-slate-200">
+      <td className="py-2 px-2 w-10 min-w-[40px] whitespace-nowrap text-center border-r border-slate-200">
         <div className="flex items-center justify-center gap-1">
           <span className="cursor-grab active:cursor-grabbing text-slate-400 hover:text-slate-700 p-0.5"><GripVertical className="w-3.5 h-3.5" /></span>
           <input type="checkbox" checked={selectedItemIds.has(item.id)} onChange={() => toggleSelectItem(item.id)} className="rounded border-slate-300 text-emerald-600 h-3.5 w-3.5 cursor-pointer" />
         </div>
       </td>
-      <SpreadsheetCell itemId={item.id} item={item} field="itemNo" value={item.itemNo} {...spreadsheet} align="center" className="text-slate-800 font-extrabold text-xs border-r border-slate-200 font-mono" />
-      <SpreadsheetCell itemId={item.id} item={item} field="description" value={item.description} {...spreadsheet} align="left" className="border-r border-slate-200 min-w-[280px]" displayFormatter={(val) => (
-        <div className="flex items-center gap-2">
+      <SpreadsheetCell itemId={item.id} item={item} field="itemNo" value={item.itemNo} {...spreadsheet} align="center" className="w-16 min-w-[64px] whitespace-nowrap text-slate-800 font-extrabold text-xs border-r border-slate-200 font-mono" />
+      <SpreadsheetCell itemId={item.id} item={item} field="description" value={item.description} {...spreadsheet} align="left" className="border-r border-slate-200 w-[360px] min-w-[360px] whitespace-nowrap" displayFormatter={(val) => (
+        <div className="flex items-center gap-2 min-w-0 w-full">
           <button onClick={(e) => { e.stopPropagation(); onToggleCollapse(item.id); }} className="p-0.5 rounded text-slate-600 hover:bg-slate-300 cursor-pointer shrink-0">
             {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
           </button>
-          <span className={`font-extrabold text-slate-900 text-xs tracking-wide ${isPlaceholder ? 'text-emerald-400/50' : ''}`}>{val || (isPlaceholder ? '⚡ Ketik untuk tambah Area...' : '')}</span>
+          <span className={`font-extrabold text-slate-900 text-xs tracking-wide truncate ${isPlaceholder ? 'text-emerald-400/50' : ''}`}>{val || (isPlaceholder ? '⚡ Ketik untuk tambah Area...' : '')}</span>
         </div>
       )} />
-      <SpreadsheetCell itemId={item.id} item={item} field="notes" value={item.notes} {...spreadsheet} align="left" className="text-slate-600 text-[11px] font-normal min-w-[140px] border-r border-slate-200" />
-      <SpreadsheetCell itemId={item.id} item={item} field="type" value={item.type} {...spreadsheet} align="center" className="font-mono text-slate-600 text-[11px] border-r border-slate-200 font-bold uppercase" />
-      <SpreadsheetCell itemId={item.id} item={item} field="d1" value={item.d1} {...spreadsheet} align="center" className="font-mono text-slate-600 text-[11px] border-r border-slate-200 font-bold" />
-      <SpreadsheetCell itemId={item.id} item={item} field="d2" value={item.d2} {...spreadsheet} align="center" className="font-mono text-slate-600 text-[11px] border-r border-slate-200 font-bold" />
-      <SpreadsheetCell itemId={item.id} item={item} field="d3" value={item.d3} {...spreadsheet} align="center" className="font-mono text-slate-600 text-[11px] border-r border-slate-200 font-bold" />
-      <SpreadsheetCell itemId={item.id} item={item} field="dLen" value={item.dLen} {...spreadsheet} align="center" className="font-mono text-amber-900 font-bold bg-amber-50/50 text-[11px] border-x-2 border-amber-300/70" />
-      <SpreadsheetCell itemId={item.id} item={item} field="d4" value={item.d4} {...spreadsheet} align="center" className="font-mono text-slate-600 text-[11px] border-r border-slate-200 font-bold" />
-      <SpreadsheetCell itemId={item.id} item={item} field="qty" value={item.qty} {...spreadsheet} align="right" className="border-r border-slate-200 w-20 font-bold font-mono" displayFormatter={(val) => formatQty2Decimal(val, isPlaceholder)} />
-      <SpreadsheetCell itemId={item.id} item={item} field="unit" value={item.unit} {...spreadsheet} align="center" className="border-r border-slate-200 w-20 font-mono text-xs font-bold text-slate-600 bg-slate-50/40" />
-      <SpreadsheetCell itemId={item.id} item={item} field="remark" value={item.remark} {...spreadsheet} align="left" className="text-slate-600 text-[11px] font-normal min-w-[130px] w-36 border-r border-slate-200" />
-      <td className="py-2 px-2 text-center">
+      <SpreadsheetCell itemId={item.id} item={item} field="notes" value={item.notes} {...spreadsheet} align="left" className="text-slate-600 text-[11px] font-normal w-[180px] min-w-[180px] whitespace-nowrap border-r border-slate-200" />
+      <SpreadsheetCell itemId={item.id} item={item} field="type" value={item.type} {...spreadsheet} align="center" className="w-24 min-w-[96px] whitespace-nowrap font-mono text-slate-600 text-[11px] border-r border-slate-200 font-bold uppercase" />
+      <SpreadsheetCell itemId={item.id} item={item} field="d1" value={item.d1} {...spreadsheet} align="center" className="w-16 min-w-[64px] whitespace-nowrap font-mono text-slate-600 text-[11px] border-r border-slate-200 font-bold" />
+      <SpreadsheetCell itemId={item.id} item={item} field="d2" value={item.d2} {...spreadsheet} align="center" className="w-16 min-w-[64px] whitespace-nowrap font-mono text-slate-600 text-[11px] border-r border-slate-200 font-bold" />
+      <SpreadsheetCell itemId={item.id} item={item} field="d3" value={item.d3} {...spreadsheet} align="center" className="w-16 min-w-[64px] whitespace-nowrap font-mono text-slate-600 text-[11px] border-r border-slate-200 font-bold" />
+      <SpreadsheetCell itemId={item.id} item={item} field="dLen" value={item.dLen} {...spreadsheet} align="center" className="w-[88px] min-w-[88px] whitespace-nowrap font-mono text-amber-900 font-bold bg-amber-50/50 text-[11px] border-x-2 border-amber-300/70" />
+      <SpreadsheetCell itemId={item.id} item={item} field="d4" value={item.d4} {...spreadsheet} align="center" className="w-16 min-w-[64px] whitespace-nowrap font-mono text-slate-600 text-[11px] border-r border-slate-200 font-bold" />
+      <SpreadsheetCell itemId={item.id} item={item} field="qty" value={item.qty} {...spreadsheet} align="right" className="border-r border-slate-200 w-[88px] min-w-[88px] whitespace-nowrap font-bold font-mono" displayFormatter={(val) => formatQty2Decimal(val, isPlaceholder)} />
+      <SpreadsheetCell itemId={item.id} item={item} field="unit" value={item.unit} {...spreadsheet} align="center" className="border-r border-slate-200 w-[84px] min-w-[84px] whitespace-nowrap font-mono text-xs font-bold text-slate-600 bg-slate-50/40" />
+      <SpreadsheetCell itemId={item.id} item={item} field="remark" value={item.remark} {...spreadsheet} align="left" className="text-slate-600 text-[11px] font-normal w-[160px] min-w-[160px] whitespace-nowrap border-r border-slate-200" />
+      <td className="py-2 px-2 w-44 min-w-[176px] whitespace-nowrap text-center">
         <div className="flex items-center justify-center gap-1.5 min-w-[160px]">
-          <button onClick={() => onInsertSubSystem(category.id, 2, item)} className="px-2.5 py-1 bg-[#03442C] hover:bg-[#04593A] text-white text-[10px] font-bold rounded-md shadow-2xs inline-flex items-center gap-1 cursor-pointer shrink-0 transition-colors">
+          <button onClick={() => onInsertSubSystem(category.id, 2, item)} className="px-2.5 py-1 bg-[#03442C] hover:bg-[#04593A] text-white text-[10px] font-bold rounded-md shadow-2xs inline-flex items-center gap-1 cursor-pointer shrink-0 transition-colors whitespace-nowrap">
             <Plus className="w-3 h-3 text-amber-300" />
             <span>+ Sub-System</span>
           </button>
@@ -5340,24 +5420,24 @@ const SubSystemRow: React.FC<SubSystemRowProps> = React.memo(({
     const activeLabels = TonnageCalculator.getDimensionLabels(editFormData.type || '');
     return (
       <tr className="bg-amber-50/90 border-t border-amber-300 border-l-4 border-l-amber-500 shadow-xs transition-colors h-[34px] min-h-[34px]">
-        <td className="py-1.5 px-3 text-center"></td>
-        <td className="py-1.5 px-1 align-top text-center min-w-[75px] max-w-[110px]">
+        <td className="py-1.5 px-3 w-10 min-w-[40px] whitespace-nowrap text-center"></td>
+        <td className="py-1.5 px-1 align-top text-center w-16 min-w-[64px] whitespace-nowrap">
           <input type="text" value={editFormData.itemNo} onChange={(e) => handleEditFormChange('itemNo', e.target.value)} onKeyDown={handleKeyDown} className="w-full text-center text-xs px-1.5 py-1.5 bg-white border border-sky-400 rounded focus:outline-hidden focus:ring-2 focus:ring-sky-500 font-bold font-mono shadow-2xs" />
         </td>
-        <td className="py-1.5 px-1 align-top min-w-[280px]">
+        <td className="py-1.5 px-1 align-top w-[360px] min-w-[360px] whitespace-nowrap">
           <input type="text" value={editFormData.description} onChange={(e) => handleEditFormChange('description', e.target.value)} onKeyDown={handleKeyDown} className="w-full text-xs px-2 py-1 bg-white border border-emerald-300 rounded focus:outline-hidden font-bold text-emerald-950 h-7" />
         </td>
-        <td className="py-1.5 px-1 align-top min-w-[140px]"><input type="text" value={editFormData.notes || ''} onChange={(e) => handleEditFormChange('notes', e.target.value)} onKeyDown={handleKeyDown} className="w-full text-xs px-2 py-1.5 bg-white border border-emerald-300 rounded" /></td>
-        <td className="py-1.5 px-1 align-top w-32 relative"><input type="text" value={editFormData.type || ''} onChange={(e) => handleEditFormChange('type', e.target.value)} onKeyDown={handleKeyDown} className="w-full text-center text-xs px-1 py-1 bg-white border border-emerald-300 rounded font-bold font-mono uppercase" /></td>
-        <td className="py-1.5 px-1 align-top w-12"><input type="text" value={editFormData.d1 || ''} onChange={(e) => handleEditFormChange('d1', e.target.value)} onKeyDown={handleKeyDown} className="w-full text-center font-mono text-xs px-1 py-1.5 bg-white border border-emerald-300 rounded font-bold" /></td>
-        <td className="py-1.5 px-1 align-top w-12"><input type="text" value={editFormData.d2 || ''} onChange={(e) => handleEditFormChange('d2', e.target.value)} onKeyDown={handleKeyDown} className="w-full text-center font-mono text-xs px-1 py-1.5 bg-white border border-emerald-300 rounded font-bold" /></td>
-        <td className="py-1.5 px-1 align-top w-12"><input type="text" value={editFormData.d3 || ''} onChange={(e) => handleEditFormChange('d3', e.target.value)} onKeyDown={handleKeyDown} className="w-full text-center font-mono text-xs px-1 py-1.5 bg-white border border-emerald-300 rounded font-bold" /></td>
-        <td className="py-1.5 px-1 align-top w-14"><input type="text" value={editFormData.dLen || ''} onChange={(e) => handleEditFormChange('dLen', e.target.value)} onKeyDown={handleKeyDown} className="w-full text-center font-mono text-xs px-1 py-1.5 bg-amber-50 border border-amber-300 rounded font-bold text-amber-900" /></td>
-        <td className="py-1.5 px-1 align-top w-14"><input type="text" value={editFormData.d4 || ''} onChange={(e) => handleEditFormChange('d4', e.target.value)} onKeyDown={handleKeyDown} className="w-full text-center font-mono text-xs px-1 py-1.5 bg-white border border-emerald-300 rounded font-bold" /></td>
-        <td className="py-1.5 px-1 align-top w-20"><input type="text" value={editFormData.qty ?? ''} onChange={(e) => handleEditFormChange('qty', e.target.value)} onKeyDown={handleKeyDown} className="w-full text-right font-mono font-bold text-xs px-1.5 py-1.5 bg-white border border-slate-300 rounded" placeholder="QTY" /></td>
-        <td className="py-1.5 px-1 align-top w-20"><input type="text" value={editFormData.unit || ''} onChange={(e) => handleEditFormChange('unit', e.target.value)} onKeyDown={handleKeyDown} className="w-full text-center font-mono font-bold text-xs px-1.5 py-1.5 bg-white border border-slate-300 rounded" /></td>
-        <td className="py-1.5 px-1 align-top min-w-[130px] w-36"><input type="text" value={editFormData.remark || ''} onChange={(e) => handleEditFormChange('remark', e.target.value)} onKeyDown={handleKeyDown} className="w-full text-xs px-2 py-1.5 bg-white border border-emerald-300 rounded" /></td>
-        <td className="py-1.5 px-1 align-top text-center w-28 pt-2.5">
+        <td className="py-1.5 px-1 align-top w-[180px] min-w-[180px] whitespace-nowrap"><input type="text" value={editFormData.notes || ''} onChange={(e) => handleEditFormChange('notes', e.target.value)} onKeyDown={handleKeyDown} className="w-full text-xs px-2 py-1.5 bg-white border border-emerald-300 rounded" /></td>
+        <td className="py-1.5 px-1 align-top w-24 min-w-[96px] whitespace-nowrap relative"><input type="text" value={editFormData.type || ''} onChange={(e) => handleEditFormChange('type', e.target.value)} onKeyDown={handleKeyDown} className="w-full text-center text-xs px-1 py-1 bg-white border border-emerald-300 rounded font-bold font-mono uppercase" /></td>
+        <td className="py-1.5 px-1 align-top w-16 min-w-[64px] whitespace-nowrap"><input type="text" value={editFormData.d1 || ''} onChange={(e) => handleEditFormChange('d1', e.target.value)} onKeyDown={handleKeyDown} className="w-full text-center font-mono text-xs px-1 py-1.5 bg-white border border-emerald-300 rounded font-bold" /></td>
+        <td className="py-1.5 px-1 align-top w-16 min-w-[64px] whitespace-nowrap"><input type="text" value={editFormData.d2 || ''} onChange={(e) => handleEditFormChange('d2', e.target.value)} onKeyDown={handleKeyDown} className="w-full text-center font-mono text-xs px-1 py-1.5 bg-white border border-emerald-300 rounded font-bold" /></td>
+        <td className="py-1.5 px-1 align-top w-16 min-w-[64px] whitespace-nowrap"><input type="text" value={editFormData.d3 || ''} onChange={(e) => handleEditFormChange('d3', e.target.value)} onKeyDown={handleKeyDown} className="w-full text-center font-mono text-xs px-1 py-1.5 bg-white border border-emerald-300 rounded font-bold" /></td>
+        <td className="py-1.5 px-1 align-top w-[88px] min-w-[88px] whitespace-nowrap"><input type="text" value={editFormData.dLen || ''} onChange={(e) => handleEditFormChange('dLen', e.target.value)} onKeyDown={handleKeyDown} className="w-full text-center font-mono text-xs px-1 py-1.5 bg-amber-50 border border-amber-300 rounded font-bold text-amber-900" /></td>
+        <td className="py-1.5 px-1 align-top w-16 min-w-[64px] whitespace-nowrap"><input type="text" value={editFormData.d4 || ''} onChange={(e) => handleEditFormChange('d4', e.target.value)} onKeyDown={handleKeyDown} className="w-full text-center font-mono text-xs px-1 py-1.5 bg-white border border-emerald-300 rounded font-bold" /></td>
+        <td className="py-1.5 px-1 align-top w-[88px] min-w-[88px] whitespace-nowrap"><input type="text" value={editFormData.qty ?? ''} onChange={(e) => handleEditFormChange('qty', e.target.value)} onKeyDown={handleKeyDown} className="w-full text-right font-mono font-bold text-xs px-1.5 py-1.5 bg-white border border-slate-300 rounded" placeholder="QTY" /></td>
+        <td className="py-1.5 px-1 align-top w-[84px] min-w-[84px] whitespace-nowrap"><input type="text" value={editFormData.unit || ''} onChange={(e) => handleEditFormChange('unit', e.target.value)} onKeyDown={handleKeyDown} className="w-full text-center font-mono font-bold text-xs px-1.5 py-1.5 bg-white border border-slate-300 rounded" /></td>
+        <td className="py-1.5 px-1 align-top w-[160px] min-w-[160px] whitespace-nowrap"><input type="text" value={editFormData.remark || ''} onChange={(e) => handleEditFormChange('remark', e.target.value)} onKeyDown={handleKeyDown} className="w-full text-xs px-2 py-1.5 bg-white border border-emerald-300 rounded" /></td>
+        <td className="py-1.5 px-1 align-top text-center w-44 min-w-[176px] whitespace-nowrap pt-2.5">
           <div className="flex items-center justify-center gap-1.5">
             <button onClick={saveInlineEdit} className="p-1.5 bg-emerald-600 text-white hover:bg-emerald-700 rounded shadow-xs"><Save className="w-3.5 h-3.5" /></button>
             <button onClick={cancelInlineEdit} className="p-1.5 bg-slate-300 text-slate-700 hover:bg-slate-400 rounded shadow-xs"><X className="w-3.5 h-3.5" /></button>
@@ -5383,34 +5463,34 @@ const SubSystemRow: React.FC<SubSystemRowProps> = React.memo(({
         'bg-white hover:bg-slate-50'
       }`}
     >
-      <td className="py-1.5 px-2 text-center border-r border-slate-200">
+      <td className="py-1.5 px-2 w-10 min-w-[40px] whitespace-nowrap text-center border-r border-slate-200">
         <div className="flex items-center justify-center gap-1">
           <span className="text-slate-300 hover:text-slate-600 p-0.5"><GripVertical className="w-3.5 h-3.5" /></span>
           <input type="checkbox" checked={selectedItemIds.has(subSystem.id)} onChange={() => toggleSelectItem(subSystem.id)} className="rounded border-slate-300 text-emerald-600 h-3.5 w-3.5 cursor-pointer" />
         </div>
       </td>
-      <SpreadsheetCell itemId={subSystem.id} item={subSystem} field="itemNo" value={subSystem.itemNo} {...spreadsheet} align="center" className="text-slate-600 font-bold text-xs border-r border-slate-200 font-mono pl-4" />
-      <SpreadsheetCell itemId={subSystem.id} item={subSystem} field="description" value={subSystem.description} {...spreadsheet} align="left" className="border-r border-slate-200 min-w-[280px]" displayFormatter={(val) => (
-        <div className="flex items-center gap-2 pl-4">
+      <SpreadsheetCell itemId={subSystem.id} item={subSystem} field="itemNo" value={subSystem.itemNo} {...spreadsheet} align="center" className="w-16 min-w-[64px] whitespace-nowrap text-slate-600 font-bold text-xs border-r border-slate-200 font-mono pl-4" />
+      <SpreadsheetCell itemId={subSystem.id} item={subSystem} field="description" value={subSystem.description} {...spreadsheet} align="left" className="border-r border-slate-200 w-[360px] min-w-[360px] whitespace-nowrap" displayFormatter={(val) => (
+        <div className="flex items-center gap-2 pl-4 min-w-0 w-full">
           <button onClick={(e) => { e.stopPropagation(); toggleNodeCollapse(subSystem.id); }} className="p-0.5 rounded text-slate-400 hover:bg-slate-200 cursor-pointer shrink-0">
             {isSubCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
           </button>
-          <span className={`font-bold text-slate-800 text-xs tracking-tight ${isPlaceholder ? 'text-emerald-400/50' : ''}`}>{val || (isPlaceholder ? '⚡ Ketik untuk tambah Sub-system...' : '')}</span>
+          <span className={`font-bold text-slate-800 text-xs tracking-tight truncate ${isPlaceholder ? 'text-emerald-400/50' : ''}`}>{val || (isPlaceholder ? '⚡ Ketik untuk tambah Sub-system...' : '')}</span>
         </div>
       )} />
-      <SpreadsheetCell itemId={subSystem.id} item={subSystem} field="notes" value={subSystem.notes} {...spreadsheet} align="left" className="text-slate-500 text-[11px] min-w-[140px] border-r border-slate-200" />
-      <SpreadsheetCell itemId={subSystem.id} item={subSystem} field="type" value={subSystem.type} {...spreadsheet} align="center" className="font-mono text-slate-500 text-[11px] border-r border-slate-200 uppercase" />
-      <SpreadsheetCell itemId={subSystem.id} item={subSystem} field="d1" value={subSystem.d1} {...spreadsheet} align="center" className="font-mono text-slate-500 text-[11px] border-r border-slate-200" />
-      <SpreadsheetCell itemId={subSystem.id} item={subSystem} field="d2" value={subSystem.d2} {...spreadsheet} align="center" className="font-mono text-slate-500 text-[11px] border-r border-slate-200" />
-      <SpreadsheetCell itemId={subSystem.id} item={subSystem} field="d3" value={subSystem.d3} {...spreadsheet} align="center" className="font-mono text-slate-500 text-[11px] border-r border-slate-200" />
-      <SpreadsheetCell itemId={subSystem.id} item={subSystem} field="dLen" value={subSystem.dLen} {...spreadsheet} align="center" className="font-mono text-amber-900 font-bold bg-amber-50/50 text-[11px] border-x-2 border-amber-300/70" />
-      <SpreadsheetCell itemId={subSystem.id} item={subSystem} field="d4" value={subSystem.d4} {...spreadsheet} align="center" className="font-mono text-slate-500 text-[11px] border-r border-slate-200" />
-      <SpreadsheetCell itemId={subSystem.id} item={subSystem} field="qty" value={subSystem.qty} {...spreadsheet} align="right" className="border-r border-slate-200 w-20 font-bold font-mono" displayFormatter={(val) => formatQty2Decimal(val, isPlaceholder)} />
-      <SpreadsheetCell itemId={subSystem.id} item={subSystem} field="unit" value={subSystem.unit} {...spreadsheet} align="center" className="border-r border-slate-200 w-20 font-mono text-xs font-bold text-slate-600 bg-slate-50/40" />
-      <SpreadsheetCell itemId={subSystem.id} item={subSystem} field="remark" value={subSystem.remark} {...spreadsheet} align="left" className="text-slate-600 text-[11px] font-normal min-w-[130px] w-36 border-r border-slate-200" />
-      <td className="py-1.5 px-2 text-center">
+      <SpreadsheetCell itemId={subSystem.id} item={subSystem} field="notes" value={subSystem.notes} {...spreadsheet} align="left" className="text-slate-500 text-[11px] w-[180px] min-w-[180px] whitespace-nowrap border-r border-slate-200" />
+      <SpreadsheetCell itemId={subSystem.id} item={subSystem} field="type" value={subSystem.type} {...spreadsheet} align="center" className="w-24 min-w-[96px] whitespace-nowrap font-mono text-slate-500 text-[11px] border-r border-slate-200 uppercase" />
+      <SpreadsheetCell itemId={subSystem.id} item={subSystem} field="d1" value={subSystem.d1} {...spreadsheet} align="center" className="w-16 min-w-[64px] whitespace-nowrap font-mono text-slate-500 text-[11px] border-r border-slate-200" />
+      <SpreadsheetCell itemId={subSystem.id} item={subSystem} field="d2" value={subSystem.d2} {...spreadsheet} align="center" className="w-16 min-w-[64px] whitespace-nowrap font-mono text-slate-500 text-[11px] border-r border-slate-200" />
+      <SpreadsheetCell itemId={subSystem.id} item={subSystem} field="d3" value={subSystem.d3} {...spreadsheet} align="center" className="w-16 min-w-[64px] whitespace-nowrap font-mono text-slate-500 text-[11px] border-r border-slate-200" />
+      <SpreadsheetCell itemId={subSystem.id} item={subSystem} field="dLen" value={subSystem.dLen} {...spreadsheet} align="center" className="w-[88px] min-w-[88px] whitespace-nowrap font-mono text-amber-900 font-bold bg-amber-50/50 text-[11px] border-x-2 border-amber-300/70" />
+      <SpreadsheetCell itemId={subSystem.id} item={subSystem} field="d4" value={subSystem.d4} {...spreadsheet} align="center" className="w-16 min-w-[64px] whitespace-nowrap font-mono text-slate-500 text-[11px] border-r border-slate-200" />
+      <SpreadsheetCell itemId={subSystem.id} item={subSystem} field="qty" value={subSystem.qty} {...spreadsheet} align="right" className="border-r border-slate-200 w-[88px] min-w-[88px] whitespace-nowrap font-bold font-mono" displayFormatter={(val) => formatQty2Decimal(val, isPlaceholder)} />
+      <SpreadsheetCell itemId={subSystem.id} item={subSystem} field="unit" value={subSystem.unit} {...spreadsheet} align="center" className="border-r border-slate-200 w-[84px] min-w-[84px] whitespace-nowrap font-mono text-xs font-bold text-slate-600 bg-slate-50/40" />
+      <SpreadsheetCell itemId={subSystem.id} item={subSystem} field="remark" value={subSystem.remark} {...spreadsheet} align="left" className="text-slate-600 text-[11px] font-normal w-[160px] min-w-[160px] whitespace-nowrap border-r border-slate-200" />
+      <td className="py-1.5 px-2 w-44 min-w-[176px] whitespace-nowrap text-center">
         <div className="flex items-center justify-center gap-1.5 min-w-[160px]">
-          <button onClick={() => openAddModalForLevel(category.id, 3, subSystem)} className="px-2.5 py-1 bg-[#046A45] hover:bg-[#058456] text-white text-[10px] font-bold rounded-md shadow-2xs inline-flex items-center gap-1 cursor-pointer shrink-0 transition-colors">
+          <button onClick={() => openAddModalForLevel(category.id, 3, subSystem)} className="px-2.5 py-1 bg-[#046A45] hover:bg-[#058456] text-white text-[10px] font-bold rounded-md shadow-2xs inline-flex items-center gap-1 cursor-pointer shrink-0 transition-colors whitespace-nowrap">
             <Plus className="w-3 h-3 text-amber-300" />
             <span>+ Komponen</span>
           </button>
@@ -5461,24 +5541,24 @@ const ComponentRow: React.FC<ComponentRowProps> = React.memo(({
   if (isEditing) {
     return (
       <tr className="bg-amber-50/90 hover:bg-amber-50/90 border-y border-amber-300 border-l-4 border-l-amber-500 shadow-xs transition-colors h-[34px] min-h-[34px]">
-        <td className="py-1.5 px-3 text-center"></td>
-        <td className="py-1.5 px-1 align-top text-center min-w-[75px] max-w-[110px]">
+        <td className="py-1.5 px-3 w-10 min-w-[40px] whitespace-nowrap text-center"></td>
+        <td className="py-1.5 px-1 align-top text-center w-16 min-w-[64px] whitespace-nowrap">
           <input type="text" value={editFormData?.itemNo || ''} onChange={(e) => handleEditFormChange?.('itemNo', e.target.value)} onKeyDown={(e) => handleKeyDown?.(e)} className="w-full text-center text-xs px-1.5 py-1.5 bg-white border border-emerald-400 rounded focus:outline-hidden focus:ring-2 focus:ring-emerald-500 font-bold font-mono shadow-2xs" />
         </td>
-        <td className="py-1.5 px-1 align-top min-w-[280px]">
+        <td className="py-1.5 px-1 align-top w-[360px] min-w-[360px] whitespace-nowrap">
           <input type="text" value={editFormData?.description || ''} onChange={(e) => handleEditFormChange?.('description', e.target.value)} onKeyDown={(e) => handleKeyDown?.(e)} className="w-full text-xs px-2 py-1 bg-white border border-emerald-300 rounded focus:outline-hidden font-medium text-slate-900 h-7" />
         </td>
-        <td className="py-1.5 px-1 align-top min-w-[140px]"><input type="text" value={editFormData?.notes || ''} onChange={(e) => handleEditFormChange?.('notes', e.target.value)} onKeyDown={(e) => handleKeyDown?.(e)} className="w-full text-xs px-2 py-1.5 bg-white border border-emerald-300 rounded" /></td>
-        <td className="py-1.5 px-1 align-top w-32 relative"><input type="text" value={editFormData?.type || ''} onChange={(e) => handleEditFormChange?.('type', e.target.value)} onKeyDown={(e) => handleKeyDown?.(e)} className="w-full text-center text-xs px-1 py-1 bg-white border border-emerald-300 rounded font-bold font-mono uppercase" /></td>
-        <td className="py-1.5 px-1 align-top w-12"><input type="text" value={editFormData?.d1 || ''} onChange={(e) => handleEditFormChange?.('d1', e.target.value)} onKeyDown={(e) => handleKeyDown?.(e)} className="w-full text-center font-mono text-xs px-1 py-1.5 bg-white border border-emerald-300 rounded font-bold" /></td>
-        <td className="py-1.5 px-1 align-top w-12"><input type="text" value={editFormData?.d2 || ''} onChange={(e) => handleEditFormChange?.('d2', e.target.value)} onKeyDown={(e) => handleKeyDown?.(e)} className="w-full text-center font-mono text-xs px-1 py-1.5 bg-white border border-emerald-300 rounded font-bold" /></td>
-        <td className="py-1.5 px-1 align-top w-12"><input type="text" value={editFormData?.d3 || ''} onChange={(e) => handleEditFormChange?.('d3', e.target.value)} onKeyDown={(e) => handleKeyDown?.(e)} className="w-full text-center font-mono text-xs px-1 py-1.5 bg-white border border-emerald-300 rounded font-bold" /></td>
-        <td className="py-1.5 px-1 align-top w-14"><input type="text" value={editFormData?.dLen || ''} onChange={(e) => handleEditFormChange?.('dLen', e.target.value)} onKeyDown={(e) => handleKeyDown?.(e)} className="w-full text-center font-mono text-xs px-1 py-1.5 bg-amber-50 border border-amber-300 rounded font-bold text-amber-900" /></td>
-        <td className="py-1.5 px-1 align-top w-14"><input type="text" value={editFormData?.d4 || ''} onChange={(e) => handleEditFormChange?.('d4', e.target.value)} onKeyDown={(e) => handleKeyDown?.(e)} className="w-full text-center font-mono text-xs px-1 py-1.5 bg-white border border-emerald-300 rounded font-bold" /></td>
-        <td className="py-1.5 px-1 align-top w-20"><input type="text" value={editFormData?.qty ?? ''} onChange={(e) => handleEditFormChange?.('qty', e.target.value)} onKeyDown={(e) => handleKeyDown?.(e)} className="w-full text-right font-mono font-bold text-xs px-1.5 py-1.5 bg-white border border-slate-300 rounded" placeholder="QTY" /></td>
-        <td className="py-1.5 px-1 align-top w-20"><input type="text" value={editFormData?.unit || ''} onChange={(e) => handleEditFormChange?.('unit', e.target.value)} onKeyDown={(e) => handleKeyDown?.(e)} className="w-full text-center font-mono font-bold text-xs px-1.5 py-1.5 bg-white border border-slate-300 rounded" /></td>
-        <td className="py-1.5 px-1 align-top min-w-[130px] w-36"><input type="text" value={editFormData?.remark || ''} onChange={(e) => handleEditFormChange?.('remark', e.target.value)} onKeyDown={(e) => handleKeyDown?.(e)} className="w-full text-xs px-2 py-1.5 bg-white border border-emerald-300 rounded font-normal" /></td>
-        <td className="py-1.5 px-1 align-top text-center w-28 pt-2.5">
+        <td className="py-1.5 px-1 align-top w-[180px] min-w-[180px] whitespace-nowrap"><input type="text" value={editFormData?.notes || ''} onChange={(e) => handleEditFormChange?.('notes', e.target.value)} onKeyDown={(e) => handleKeyDown?.(e)} className="w-full text-xs px-2 py-1.5 bg-white border border-emerald-300 rounded" /></td>
+        <td className="py-1.5 px-1 align-top w-24 min-w-[96px] whitespace-nowrap relative"><input type="text" value={editFormData?.type || ''} onChange={(e) => handleEditFormChange?.('type', e.target.value)} onKeyDown={(e) => handleKeyDown?.(e)} className="w-full text-center text-xs px-1 py-1 bg-white border border-emerald-300 rounded font-bold font-mono uppercase" /></td>
+        <td className="py-1.5 px-1 align-top w-16 min-w-[64px] whitespace-nowrap"><input type="text" value={editFormData?.d1 || ''} onChange={(e) => handleEditFormChange?.('d1', e.target.value)} onKeyDown={(e) => handleKeyDown?.(e)} className="w-full text-center font-mono text-xs px-1 py-1.5 bg-white border border-emerald-300 rounded font-bold" /></td>
+        <td className="py-1.5 px-1 align-top w-16 min-w-[64px] whitespace-nowrap"><input type="text" value={editFormData?.d2 || ''} onChange={(e) => handleEditFormChange?.('d2', e.target.value)} onKeyDown={(e) => handleKeyDown?.(e)} className="w-full text-center font-mono text-xs px-1 py-1.5 bg-white border border-emerald-300 rounded font-bold" /></td>
+        <td className="py-1.5 px-1 align-top w-16 min-w-[64px] whitespace-nowrap"><input type="text" value={editFormData?.d3 || ''} onChange={(e) => handleEditFormChange?.('d3', e.target.value)} onKeyDown={(e) => handleKeyDown?.(e)} className="w-full text-center font-mono text-xs px-1 py-1.5 bg-white border border-emerald-300 rounded font-bold" /></td>
+        <td className="py-1.5 px-1 align-top w-[88px] min-w-[88px] whitespace-nowrap"><input type="text" value={editFormData?.dLen || ''} onChange={(e) => handleEditFormChange?.('dLen', e.target.value)} onKeyDown={(e) => handleKeyDown?.(e)} className="w-full text-center font-mono text-xs px-1 py-1.5 bg-amber-50 border border-amber-300 rounded font-bold text-amber-900" /></td>
+        <td className="py-1.5 px-1 align-top w-16 min-w-[64px] whitespace-nowrap"><input type="text" value={editFormData?.d4 || ''} onChange={(e) => handleEditFormChange?.('d4', e.target.value)} onKeyDown={(e) => handleKeyDown?.(e)} className="w-full text-center font-mono text-xs px-1 py-1.5 bg-white border border-emerald-300 rounded font-bold" /></td>
+        <td className="py-1.5 px-1 align-top w-[88px] min-w-[88px] whitespace-nowrap"><input type="text" value={editFormData?.qty ?? ''} onChange={(e) => handleEditFormChange?.('qty', e.target.value)} onKeyDown={(e) => handleKeyDown?.(e)} className="w-full text-right font-mono font-bold text-xs px-1.5 py-1.5 bg-white border border-slate-300 rounded" placeholder="QTY" /></td>
+        <td className="py-1.5 px-1 align-top w-[84px] min-w-[84px] whitespace-nowrap"><input type="text" value={editFormData?.unit || ''} onChange={(e) => handleEditFormChange?.('unit', e.target.value)} onKeyDown={(e) => handleKeyDown?.(e)} className="w-full text-center font-mono font-bold text-xs px-1.5 py-1.5 bg-white border border-slate-300 rounded" /></td>
+        <td className="py-1.5 px-1 align-top w-[160px] min-w-[160px] whitespace-nowrap"><input type="text" value={editFormData?.remark || ''} onChange={(e) => handleEditFormChange?.('remark', e.target.value)} onKeyDown={(e) => handleKeyDown?.(e)} className="w-full text-xs px-2 py-1.5 bg-white border border-emerald-300 rounded font-normal" /></td>
+        <td className="py-1.5 px-1 align-top text-center w-44 min-w-[176px] whitespace-nowrap pt-2.5">
           <div className="flex items-center justify-center gap-1.5">
             <button onClick={() => saveInlineEdit?.()} className="p-1.5 bg-emerald-600 text-white hover:bg-emerald-700 rounded shadow-xs"><Save className="w-3.5 h-3.5" /></button>
             <button onClick={() => cancelInlineEdit?.()} className="p-1.5 bg-slate-300 text-slate-700 hover:bg-slate-400 rounded shadow-xs"><X className="w-3.5 h-3.5" /></button>
@@ -5506,7 +5586,7 @@ const ComponentRow: React.FC<ComponentRowProps> = React.memo(({
         'hover:bg-slate-50'
       }`}
     >
-      <td className="py-1.5 px-2 text-center border-r border-slate-200 bg-slate-50/30">
+      <td className="py-1.5 px-2 w-10 min-w-[40px] whitespace-nowrap text-center border-r border-slate-200 bg-slate-50/30">
         {!isPlaceholder ? (
           <div className="flex items-center justify-center gap-1">
             <span className="text-slate-300 hover:text-slate-600 p-0.5"><GripVertical className="w-3.5 h-3.5" /></span>
@@ -5516,25 +5596,25 @@ const ComponentRow: React.FC<ComponentRowProps> = React.memo(({
           <div className="flex justify-center"><Plus className="w-3.5 h-3.5 text-emerald-400" /></div>
         )}
       </td>
-      <SpreadsheetCell itemId={item.id} item={item} field="itemNo" value={item.itemNo} {...spreadsheet} align="center" className={`font-mono text-[11px] border-r border-slate-200 ${isPlaceholder ? 'text-emerald-700 font-bold bg-emerald-50/70' : 'text-slate-500'}`} />
-      <SpreadsheetCell itemId={item.id} item={item} field="description" value={item.description} {...spreadsheet} align="left" className="border-r border-slate-200 min-w-[280px]" displayFormatter={(val) => (
-        <div className="flex items-center gap-2 pl-8">
-          <span className={isPlaceholder ? 'text-emerald-800 font-medium' : 'text-slate-700'}>
+      <SpreadsheetCell itemId={item.id} item={item} field="itemNo" value={item.itemNo} {...spreadsheet} align="center" className={`w-16 min-w-[64px] whitespace-nowrap font-mono text-[11px] border-r border-slate-200 ${isPlaceholder ? 'text-emerald-700 font-bold bg-emerald-50/70' : 'text-slate-500'}`} />
+      <SpreadsheetCell itemId={item.id} item={item} field="description" value={item.description} {...spreadsheet} align="left" className="border-r border-slate-200 w-[360px] min-w-[360px] whitespace-nowrap" displayFormatter={(val) => (
+        <div className="flex items-center gap-2 pl-8 min-w-0 w-full">
+          <span className={`truncate ${isPlaceholder ? 'text-emerald-800 font-medium' : 'text-slate-700'}`}>
             {val || (isPlaceholder ? '(Ketik uraian baru • Tab untuk sel berikut • Enter simpan)' : '-')}
           </span>
         </div>
       )} />
-      <SpreadsheetCell itemId={item.id} item={item} field="notes" value={item.notes} {...spreadsheet} align="left" className="text-slate-500 text-[11px] min-w-[140px] border-r border-slate-200" />
-      <SpreadsheetCell itemId={item.id} item={item} field="type" value={item.type} {...spreadsheet} align="center" className="font-mono text-slate-500 text-[11px] border-r border-slate-200 uppercase" />
-      <SpreadsheetCell itemId={item.id} item={item} field="d1" value={item.d1} {...spreadsheet} align="center" className="font-mono text-slate-500 text-[11px] border-r border-slate-200" />
-      <SpreadsheetCell itemId={item.id} item={item} field="d2" value={item.d2} {...spreadsheet} align="center" className="font-mono text-slate-500 text-[11px] border-r border-slate-200" />
-      <SpreadsheetCell itemId={item.id} item={item} field="d3" value={item.d3} {...spreadsheet} align="center" className="font-mono text-slate-500 text-[11px] border-r border-slate-200" />
-      <SpreadsheetCell itemId={item.id} item={item} field="dLen" value={item.dLen} {...spreadsheet} align="center" className="font-mono text-amber-900 font-bold bg-amber-50/50 text-[11px] border-x-2 border-amber-300/70" />
-      <SpreadsheetCell itemId={item.id} item={item} field="d4" value={item.d4} {...spreadsheet} align="center" className="font-mono text-slate-500 text-[11px] border-r border-slate-200" />
-      <SpreadsheetCell itemId={item.id} item={item} field="qty" value={item.qty} {...spreadsheet} align="right" className="border-r border-slate-200 w-20 font-bold font-mono" displayFormatter={(val) => formatQty2Decimal(val, isPlaceholder)} />
-      <SpreadsheetCell itemId={item.id} item={item} field="unit" value={item.unit} {...spreadsheet} align="center" className="border-r border-slate-200 w-20 font-mono text-xs font-bold text-slate-600 bg-slate-50/40" />
-      <SpreadsheetCell itemId={item.id} item={item} field="remark" value={item.remark} {...spreadsheet} align="left" className="text-slate-500 text-[11px] min-w-[130px] w-36 border-r border-slate-200" />
-      <td className="py-1.5 px-2 text-center">
+      <SpreadsheetCell itemId={item.id} item={item} field="notes" value={item.notes} {...spreadsheet} align="left" className="text-slate-500 text-[11px] w-[180px] min-w-[180px] whitespace-nowrap border-r border-slate-200" />
+      <SpreadsheetCell itemId={item.id} item={item} field="type" value={item.type} {...spreadsheet} align="center" className="w-24 min-w-[96px] whitespace-nowrap font-mono text-slate-500 text-[11px] border-r border-slate-200 uppercase" />
+      <SpreadsheetCell itemId={item.id} item={item} field="d1" value={item.d1} {...spreadsheet} align="center" className="w-16 min-w-[64px] whitespace-nowrap font-mono text-slate-500 text-[11px] border-r border-slate-200" />
+      <SpreadsheetCell itemId={item.id} item={item} field="d2" value={item.d2} {...spreadsheet} align="center" className="w-16 min-w-[64px] whitespace-nowrap font-mono text-slate-500 text-[11px] border-r border-slate-200" />
+      <SpreadsheetCell itemId={item.id} item={item} field="d3" value={item.d3} {...spreadsheet} align="center" className="w-16 min-w-[64px] whitespace-nowrap font-mono text-slate-500 text-[11px] border-r border-slate-200" />
+      <SpreadsheetCell itemId={item.id} item={item} field="dLen" value={item.dLen} {...spreadsheet} align="center" className="w-[88px] min-w-[88px] whitespace-nowrap font-mono text-amber-900 font-bold bg-amber-50/50 text-[11px] border-x-2 border-amber-300/70" />
+      <SpreadsheetCell itemId={item.id} item={item} field="d4" value={item.d4} {...spreadsheet} align="center" className="w-16 min-w-[64px] whitespace-nowrap font-mono text-slate-500 text-[11px] border-r border-slate-200" />
+      <SpreadsheetCell itemId={item.id} item={item} field="qty" value={item.qty} {...spreadsheet} align="right" className="border-r border-slate-200 w-[88px] min-w-[88px] whitespace-nowrap font-bold font-mono" displayFormatter={(val) => formatQty2Decimal(val, isPlaceholder)} />
+      <SpreadsheetCell itemId={item.id} item={item} field="unit" value={item.unit} {...spreadsheet} align="center" className="border-r border-slate-200 w-[84px] min-w-[84px] whitespace-nowrap font-mono text-xs font-bold text-slate-600 bg-slate-50/40" />
+      <SpreadsheetCell itemId={item.id} item={item} field="remark" value={item.remark} {...spreadsheet} align="left" className="text-slate-500 text-[11px] w-[160px] min-w-[160px] whitespace-nowrap border-r border-slate-200" />
+      <td className="py-1.5 px-2 w-44 min-w-[176px] whitespace-nowrap text-center">
         {!isPlaceholder && (
           <div className="flex items-center justify-center gap-1.5">
             <button onClick={() => toggleItemCompleted?.(item)} className={`p-1 rounded transition-colors ${item.isCompleted ? 'text-emerald-600 bg-emerald-50' : 'text-slate-300 hover:text-emerald-600 hover:bg-emerald-50'}`}><CheckCircle2 className="w-3.5 h-3.5" /></button>
@@ -5543,7 +5623,7 @@ const ComponentRow: React.FC<ComponentRowProps> = React.memo(({
           </div>
         )}
         {isPlaceholder && (
-          <button onClick={() => onInsertRowBelow?.(item)} className="px-2.5 py-1 bg-[#03442C] hover:bg-[#04593A] text-white text-[10px] font-bold rounded-md shadow-2xs inline-flex items-center gap-1 cursor-pointer shrink-0 transition-colors" title="Simpan baris pekerjaan ini (Enter)"><Plus className="w-3 h-3 text-emerald-300" /><span>+ Simpan</span></button>
+          <button onClick={() => onInsertRowBelow?.(item)} className="px-2.5 py-1 bg-[#03442C] hover:bg-[#04593A] text-white text-[10px] font-bold rounded-md shadow-2xs inline-flex items-center gap-1 cursor-pointer shrink-0 transition-colors whitespace-nowrap" title="Simpan baris pekerjaan ini (Enter)"><Plus className="w-3 h-3 text-emerald-300" /><span>+ Simpan</span></button>
         )}
       </td>
     </tr>

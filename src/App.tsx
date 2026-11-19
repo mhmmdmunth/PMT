@@ -30,8 +30,8 @@ const DefectSurveyList = lazy(() =>
 const DefectSurveyModal = lazy(() =>
   import('./components/DefectSurveyModal').then((m) => ({ default: m.DefectSurveyModal }))
 );
-const CostEstimationSummary = lazy(() =>
-  import('./components/CostEstimationSummary').then((m) => ({ default: m.CostEstimationSummary }))
+const RabModule = lazy(() =>
+  import('./components/RabModule').then((m) => ({ default: m.RabModule }))
 );
 const MaterialEstimationView = lazy(() =>
   import('./components/MaterialEstimation/MaterialEstimationView').then((m) => ({ default: m.MaterialEstimationView }))
@@ -611,10 +611,13 @@ export default function App() {
 
   const handleUpdateOpnameItem = useCallback((item: WorkItem) => {
     sqliteService.updateOpnameWorkItem(item);
+    setOpnameItems((prev) => prev.map((o) => (o.id === item.id ? item : o)));
   }, []);
 
   const handleUpdateOpnameItemsBatch = useCallback((items: WorkItem[]) => {
     sqliteService.updateOpnameWorkItemsBatch(items);
+    const itemMap = new Map(items.map((i) => [i.id, i]));
+    setOpnameItems((prev) => prev.map((o) => itemMap.get(o.id) || o));
   }, []);
 
   const handleDeleteOpnameItem = useCallback((id: string) => {
@@ -861,6 +864,8 @@ export default function App() {
 
   const handleNavigateToRepairList = useCallback(() => setActiveTab('repair-list'), []);
   const handleNavigateToMaterialEstimation = useCallback(() => setActiveTab('material-estimation'), []);
+  const handleNavigateToOpname = useCallback(() => setActiveTab('opname'), []);
+  const handleNavigateToSatisfactionNote = useCallback(() => setActiveTab('satisfaction-note'), []);
   const handleOpenImportModal = useCallback(() => handleOpenExportImportModal('import'), [handleOpenExportImportModal]);
 
   // VIEW 1: Login Screen (Shown when requested or logging in for a project)
@@ -949,7 +954,7 @@ export default function App() {
       />
 
       {/* Main Content Area */}
-      <main className="w-full px-2 sm:px-3 py-3 flex-1">
+      <main className="w-full max-w-full min-w-0 px-2 sm:px-3 py-3 flex-1">
         {activeTab === 'repair-list' && (
           <RepairListTable
             categories={categories}
@@ -1068,10 +1073,12 @@ export default function App() {
 
         {activeTab === 'cost-estimation' && (
           <Suspense fallback={TabLoadingFallback}>
-            <CostEstimationSummary
+            <RabModule
               categories={categories}
               workItems={workItems}
+              opnameItems={opnameItems}
               vessel={vessel}
+              schedule={schedule}
               onOpenPdfModal={handleOpenPdfModal}
               onExportExcel={handleExportExcel}
               onExportWord={handleQuickExportWord}
@@ -1083,7 +1090,13 @@ export default function App() {
               onDeleteItem={handleDeleteWorkItem}
               onBulkDeleteItems={handleBulkDeleteWorkItems}
               onUpdateItemsBatch={handleUpdateWorkItemsBatch}
+              onUpdateOpnameItem={handleUpdateOpnameItem}
+              onBatchUpdateOpnameItems={handleUpdateOpnameItemsBatch}
+              onSyncOpnameFromRepairList={handleSyncOpnameFromRepairList}
               onNavigateToMaterialEstimation={handleNavigateToMaterialEstimation}
+              onNavigateToOpname={handleNavigateToOpname}
+              onNavigateToSatisfactionNote={handleNavigateToSatisfactionNote}
+              onNotify={showToast}
             />
           </Suspense>
         )}

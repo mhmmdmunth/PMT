@@ -190,7 +190,7 @@ export const SpreadsheetCell: React.FC<SpreadsheetCellProps> = ({
   // Render Editing Input with stable height matching view mode (exact 32px)
   if (isEditing) {
     return (
-      <td className={`p-0 relative z-20 bg-amber-50 h-8 box-border ${className}`}>
+      <td className={`p-0 relative z-20 bg-amber-50 h-8 box-border whitespace-nowrap ${className}`}>
         {inputType === 'select' && selectOptions ? (
           <select
             ref={inputRef as React.RefObject<HTMLSelectElement>}
@@ -258,7 +258,7 @@ export const SpreadsheetCell: React.FC<SpreadsheetCellProps> = ({
         }
       }}
       title={field === 'itemNo' ? 'Klik sel langsung untuk edit Nomor Item (No.)' : undefined}
-      className={`relative px-2 py-0 h-8 text-xs font-sans select-none box-border ${
+      className={`relative px-2 py-0 h-8 text-xs font-sans select-none box-border whitespace-nowrap ${
         isLocked ? 'cursor-not-allowed bg-slate-100/70 opacity-60 text-slate-400' : 'cursor-cell'
       } ${alignClass} ${
         isSelected
@@ -266,7 +266,7 @@ export const SpreadsheetCell: React.FC<SpreadsheetCellProps> = ({
           : !isLocked ? 'hover:bg-slate-100/80' : ''
       } ${className}`}
     >
-      <div className={`h-8 flex items-center ${alignClass === 'text-center' ? 'justify-center' : alignClass === 'text-right' ? 'justify-end' : 'justify-start'} ${inputType === 'textarea' || displayFormatter ? 'max-w-full overflow-hidden truncate' : 'truncate max-w-full'}`}>
+      <div className={`h-8 flex items-center whitespace-nowrap ${alignClass === 'text-center' ? 'justify-center' : alignClass === 'text-right' ? 'justify-end' : 'justify-start'} ${inputType === 'textarea' || displayFormatter ? 'max-w-full overflow-hidden truncate' : 'truncate max-w-full'}`}>
         {displayFormatter ? (formattedContent !== undefined && formattedContent !== null ? formattedContent : '') : (formattedContent || <span className="text-slate-300 italic text-[11px]">-</span>)}
       </div>
 

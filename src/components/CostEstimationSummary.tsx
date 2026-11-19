@@ -66,6 +66,11 @@ interface CostEstimationSummaryProps {
   onBulkDeleteItems?: (ids: string[]) => void;
   onUpdateItemsBatch?: (updatedItems: WorkItem[]) => void;
   onNavigateToMaterialEstimation?: () => void;
+  overheadPercent?: number;
+  onOverheadPercentChange?: (val: number) => void;
+  ppnPercent?: number;
+  onPpnPercentChange?: (val: number) => void;
+  embeddedInRabModule?: boolean;
 }
 
 export const CostEstimationSummary: React.FC<CostEstimationSummaryProps> = React.memo(({
@@ -84,9 +89,14 @@ export const CostEstimationSummary: React.FC<CostEstimationSummaryProps> = React
   onBulkDeleteItems,
   onUpdateItemsBatch,
   onNavigateToMaterialEstimation,
+  overheadPercent: controlledOverhead,
+  onOverheadPercentChange,
+  ppnPercent: controlledPpn,
+  onPpnPercentChange,
+  embeddedInRabModule = false,
 }) => {
   const [viewMode, setViewMode] = useState<'summary' | 'detailed'>('detailed');
-  const [overheadPercent, setOverheadPercent] = useState<number>(() => {
+  const [internalOverheadPercent, setInternalOverheadPercent] = useState<number>(() => {
     try {
       const saved = localStorage.getItem(`shipyard_overhead_percent_${vessel.id || 'default'}`);
       if (saved) return parseFloat(saved);
@@ -95,7 +105,7 @@ export const CostEstimationSummary: React.FC<CostEstimationSummaryProps> = React
     }
     return 5;
   });
-  const [ppnPercent, setPpnPercent] = useState<number>(() => {
+  const [internalPpnPercent, setInternalPpnPercent] = useState<number>(() => {
     try {
       const saved = localStorage.getItem(`shipyard_ppn_percent_${vessel.id || 'default'}`);
       if (saved) return parseFloat(saved);
@@ -105,21 +115,35 @@ export const CostEstimationSummary: React.FC<CostEstimationSummaryProps> = React
     return 11;
   });
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(`shipyard_overhead_percent_${vessel.id || 'default'}`, String(overheadPercent));
-    } catch (e) {
-      console.warn(e);
-    }
-  }, [overheadPercent, vessel.id]);
+  const overheadPercent = controlledOverhead !== undefined ? controlledOverhead : internalOverheadPercent;
+  const setOverheadPercent = (val: number) => {
+    if (onOverheadPercentChange) onOverheadPercentChange(val);
+    else setInternalOverheadPercent(val);
+  };
+
+  const ppnPercent = controlledPpn !== undefined ? controlledPpn : internalPpnPercent;
+  const setPpnPercent = (val: number) => {
+    if (onPpnPercentChange) onPpnPercentChange(val);
+    else setInternalPpnPercent(val);
+  };
 
   useEffect(() => {
+    if (controlledOverhead !== undefined) return;
     try {
-      localStorage.setItem(`shipyard_ppn_percent_${vessel.id || 'default'}`, String(ppnPercent));
+      localStorage.setItem(`shipyard_overhead_percent_${vessel.id || 'default'}`, String(internalOverheadPercent));
     } catch (e) {
       console.warn(e);
     }
-  }, [ppnPercent, vessel.id]);
+  }, [internalOverheadPercent, vessel.id, controlledOverhead]);
+
+  useEffect(() => {
+    if (controlledPpn !== undefined) return;
+    try {
+      localStorage.setItem(`shipyard_ppn_percent_${vessel.id || 'default'}`, String(internalPpnPercent));
+    } catch (e) {
+      console.warn(e);
+    }
+  }, [internalPpnPercent, vessel.id, controlledPpn]);
 
   // Department & Category & Area Filter states matching RepairListTable
   const [selectedDepartment, setSelectedDepartment] = useState<string>('all');
@@ -1214,10 +1238,12 @@ export const CostEstimationSummary: React.FC<CostEstimationSummaryProps> = React
             </div>
             <div>
               <h2 className="text-base font-bold text-slate-900 leading-tight">
-                Rencana Anggaran Biaya (RAB) &amp; Estimasi Biaya Galangan
+                {embeddedInRabModule
+                  ? 'Rincian Biaya Repair List (Anggaran Kontrak / Plan)'
+                  : 'Rencana Anggaran Biaya (RAB) & Estimasi Biaya Galangan'}
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
-                Kapal: <span className="font-semibold text-slate-800">{vessel.name}</span> ({vessel.companyOwner}) &bull; Estimasi Sistem Tarif Terpusat
+                Kapal: <span className="font-semibold text-slate-800">{vessel.name}</span> ({vessel.companyOwner}) &bull; {embeddedInRabModule ? 'Sumber Data: Tabel Repair List' : 'Estimasi Sistem Tarif Terpusat'}
               </p>
             </div>
           </div>

@@ -580,18 +580,18 @@ export const Header: React.FC<HeaderProps> = React.memo(({
             </span>
           </button>
 
-          {/* TAB 6: RAB & Estimasi Biaya */}
+          {/* TAB 6: Modul RAB (Repair List, Opname & Satisfaction Note) */}
           <button
             id="tab-btn-cost-estimation"
             onClick={() => setActiveTab('cost-estimation')}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap min-h-[34px] cursor-pointer transition-all ${
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 min-h-[34px] cursor-pointer transition-all ${
               activeTab === 'cost-estimation'
                 ? 'bg-[#0b2545] text-white shadow-xs ring-1 ring-[#0b2545]'
                 : 'bg-slate-100 hover:bg-slate-200/80 text-slate-700 hover:text-slate-900 border border-slate-200/90'
             }`}
           >
             <FileSpreadsheet className={`w-3.5 h-3.5 ${activeTab === 'cost-estimation' ? 'text-emerald-400' : 'text-slate-500'}`} />
-            <span>RAB &amp; Estimasi</span>
+            <span>RAB</span>
             {costSummary.totalCost > 0 && (
               <span
                 className={`hidden md:inline-block px-1.5 py-0.2 rounded-md text-[10px] font-mono font-bold ${

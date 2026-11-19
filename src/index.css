@@ -47,6 +47,22 @@ body {
   transform: translateZ(0);
 }
 
+/* Horizontal table scroll wrapper & subtle right-edge scroll-hint shadow */
+.repair-scroll-container {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+}
+
+.scroll-hint {
+  background: linear-gradient(
+    to left,
+    rgba(15, 23, 42, 0.14) 0%,
+    rgba(15, 23, 42, 0.06) 45%,
+    rgba(15, 23, 42, 0) 100%
+  );
+  box-shadow: inset -1px 0 0 rgba(3, 68, 44, 0.08);
+}
+
 
 @media print {
   /* Hide all non-printable UI elements */

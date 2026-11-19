@@ -1,4 +1,5 @@
 import initSqlJs, { Database } from 'sql.js';
+import sqlWasmUrl from 'sql.js/dist/sql-wasm.wasm?url';
 import {
   VesselSpec,
   ProjectSchedule,
@@ -32,25 +33,33 @@ const DB_FALLBACK_JSON_KEY = 'shipyard_sqlite_fallback_v1';
 
 /**
  * Robust WebAssembly binary loader for SQL.js.
- * Handles subpaths, preview iframes, relative URLs, and validates the WASM magic bytes
- * to prevent MIME type and HTML 404 response errors.
+ * Prioritizes Vite's bundled hashed asset URL (immune to SPA rewrites on Vercel/CDNs),
+ * then checks root/relative paths and validates WASM magic bytes.
  */
 async function loadSqlWasmBinary(): Promise<ArrayBuffer | null> {
   if (typeof window === 'undefined') return null;
 
   const currentHref = window.location.href;
+  const originUrl = window.location.origin;
   const pathname = window.location.pathname;
   const basePath = pathname.endsWith('/')
     ? pathname
     : pathname.substring(0, pathname.lastIndexOf('/') + 1);
 
+  const resolvedBundledUrl = sqlWasmUrl
+    ? new URL(sqlWasmUrl, originUrl).href
+    : '';
+
   const candidateUrls = [
+    resolvedBundledUrl,
+    sqlWasmUrl,
+    new URL('/sql-wasm.wasm', originUrl).href,
+    '/sql-wasm.wasm',
     new URL('sql-wasm.wasm', currentHref).href,
     basePath + 'sql-wasm.wasm',
     typeof document !== 'undefined' && document.baseURI ? new URL('sql-wasm.wasm', document.baseURI).href : '',
     './sql-wasm.wasm',
     'sql-wasm.wasm',
-    '/sql-wasm.wasm',
   ].filter(Boolean);
 
   const uniqueUrls = Array.from(new Set(candidateUrls));
@@ -163,9 +172,12 @@ class SqliteService {
           // Pass the verified binary directly to avoid any fetch/MIME issues in browser
           SQL = await initSqlJs({ wasmBinary });
         } else {
-          // Secondary attempt with relative URL
+          // Secondary attempt using Vite bundled URL or root path
           SQL = await initSqlJs({
-            locateFile: (file) => new URL(file, window.location.href).href,
+            locateFile: (file) =>
+              file === 'sql-wasm.wasm' && sqlWasmUrl
+                ? sqlWasmUrl
+                : new URL(`/${file}`, window.location.origin).href,
           });
         }
 
@@ -264,6 +276,273 @@ class SqliteService {
       }
     };
 
+    const ALL_WORK_ITEM_COLUMNS = [
+      'id',
+      'project_id',
+      'category_id',
+      'item_no',
+      'description',
+      'type',
+      'd1',
+      'd2',
+      'd3',
+      'd_len',
+      'd4',
+      'qty',
+      'unit',
+      'weight_kg',
+      'unit_price',
+      'total_price',
+      'remark',
+      'remark2',
+      'is_completed',
+      'notes',
+      'parent_id',
+      'item_level',
+      'is_area_header',
+      'progress_percent',
+      'progress_qty',
+      'progress_notes',
+      'progress_date',
+      'updated_at',
+      'updated_by',
+      'updated_by_user_id',
+      'updated_action',
+      'price_basis',
+      'start_date',
+      'target_end_date',
+      'actual_start_date',
+      'actual_end_date',
+      'plan_percent',
+      'weight_factor',
+      'assigned_to',
+      'subcontractor',
+      'opname_status',
+      'opname_qty',
+      'opname_percent',
+      'opname_date',
+      'opname_inspector',
+      'opname_notes',
+      'opname_bapo_no',
+      'daily_logs_json',
+      'plan_logs_json',
+    ];
+
+    const getWorkItemColValue = (w: WorkItem, col: string): any => {
+      switch (col) {
+        case 'id': return w.id;
+        case 'project_id': return w.projectId || 'proj-f049';
+        case 'category_id': return w.categoryId || 'cat-1';
+        case 'item_no': return w.itemNo || '';
+        case 'description': return w.description || '';
+        case 'type': return w.type || '';
+        case 'd1': return w.d1 || '';
+        case 'd2': return w.d2 || '';
+        case 'd3': return w.d3 || '';
+        case 'd_len': return w.dLen || '';
+        case 'd4': return w.d4 || '';
+        case 'qty': return w.qty !== undefined && w.qty !== null && (w.qty as any) !== '' ? Number(w.qty) : 0;
+        case 'unit': return w.unit || '';
+        case 'weight_kg': return Number(w.weightKg || 0);
+        case 'unit_price': return Number(w.unitPrice || 0);
+        case 'total_price': return Number(w.totalPrice || 0);
+        case 'remark': return w.remark || '';
+        case 'remark2': return w.remark2 || '';
+        case 'is_completed': return w.isCompleted ? 1 : 0;
+        case 'notes': return w.notes || '';
+        case 'parent_id': return w.parentId || null;
+        case 'item_level': return w.itemLevel !== undefined && w.itemLevel !== null ? w.itemLevel : null;
+        case 'is_area_header': return w.isAreaHeader ? 1 : 0;
+        case 'progress_percent': return w.progressPercent !== undefined && w.progressPercent !== null ? w.progressPercent : (w.isCompleted ? 100 : 0);
+        case 'progress_qty': return w.progressQty !== undefined && w.progressQty !== null ? w.progressQty : null;
+        case 'progress_notes': return w.progressNotes || null;
+        case 'progress_date': return w.progressDate || null;
+        case 'updated_at': return w.updatedAt || null;
+        case 'updated_by': return w.updatedBy || null;
+        case 'updated_by_user_id': return w.updatedByUserId || null;
+        case 'updated_action': return w.updatedAction || null;
+        case 'price_basis': return w.priceBasis || null;
+        case 'start_date': return w.startDate || null;
+        case 'target_end_date': return w.targetEndDate || null;
+        case 'actual_start_date': return w.actualStartDate || null;
+        case 'actual_end_date': return w.actualEndDate || null;
+        case 'plan_percent': return w.planPercent !== undefined && w.planPercent !== null ? w.planPercent : null;
+        case 'weight_factor': return w.weightFactor !== undefined && w.weightFactor !== null ? w.weightFactor : null;
+        case 'assigned_to': return w.assignedTo || null;
+        case 'subcontractor': return w.subcontractor || null;
+        case 'opname_status': return w.opnameStatus || null;
+        case 'opname_qty': return w.opnameQty !== undefined && w.opnameQty !== null ? w.opnameQty : null;
+        case 'opname_percent': return w.opnamePercent !== undefined && w.opnamePercent !== null ? w.opnamePercent : null;
+        case 'opname_date': return w.opnameDate || null;
+        case 'opname_inspector': return w.opnameInspector || null;
+        case 'opname_notes': return w.opnameNotes || null;
+        case 'opname_bapo_no': return w.opnameBapoNo || null;
+        case 'daily_logs_json': return w.dailyLogs ? JSON.stringify(w.dailyLogs) : null;
+        case 'plan_logs_json': return w.planLogs ? JSON.stringify(w.planLogs) : null;
+        default: return null;
+      }
+    };
+
+    const parseJsonSafe = (val: any) => {
+      if (!val) return undefined;
+      if (typeof val === 'object') return val;
+      try {
+        return JSON.parse(String(val)) || {};
+      } catch {
+        return undefined;
+      }
+    };
+
+    const setWorkItemColValue = (target: WorkItem, col: string, val: any) => {
+      switch (col) {
+        case 'id': target.id = String(val); break;
+        case 'project_id': target.projectId = val ? String(val) : 'proj-f049'; break;
+        case 'category_id': target.categoryId = val ? String(val) : 'cat-1'; break;
+        case 'item_no': target.itemNo = val !== null && val !== undefined ? String(val) : ''; break;
+        case 'description': target.description = val !== null && val !== undefined ? String(val) : ''; break;
+        case 'type': target.type = val !== null && val !== undefined ? String(val) : ''; break;
+        case 'd1': target.d1 = val !== null && val !== undefined ? String(val) : ''; break;
+        case 'd2': target.d2 = val !== null && val !== undefined ? String(val) : ''; break;
+        case 'd3': target.d3 = val !== null && val !== undefined ? String(val) : ''; break;
+        case 'd_len': target.dLen = val !== null && val !== undefined ? String(val) : ''; break;
+        case 'd4': target.d4 = val !== null && val !== undefined ? String(val) : ''; break;
+        case 'qty': target.qty = val !== null && val !== undefined && val !== '' ? Number(val) || 0 : 0; break;
+        case 'unit': target.unit = val !== null && val !== undefined ? String(val) : ''; break;
+        case 'weight_kg': target.weightKg = val !== null && val !== undefined ? Number(val) || 0 : 0; break;
+        case 'unit_price': target.unitPrice = val !== null && val !== undefined ? Number(val) || 0 : 0; break;
+        case 'total_price': target.totalPrice = val !== null && val !== undefined ? Number(val) || 0 : 0; break;
+        case 'remark': target.remark = val !== null && val !== undefined ? String(val) : ''; break;
+        case 'remark2': target.remark2 = val !== null && val !== undefined ? String(val) : ''; break;
+        case 'is_completed': target.isCompleted = Boolean(val); break;
+        case 'notes': target.notes = val !== null && val !== undefined ? String(val) : ''; break;
+        case 'parent_id': target.parentId = val ? String(val) : undefined; break;
+        case 'item_level': target.itemLevel = val !== null && val !== undefined ? Number(val) as any : undefined; break;
+        case 'is_area_header': target.isAreaHeader = Boolean(val); break;
+        case 'progress_percent': target.progressPercent = val !== null && val !== undefined ? Number(val) : 0; break;
+        case 'progress_qty': target.progressQty = val !== null && val !== undefined ? Number(val) : undefined; break;
+        case 'progress_notes': target.progressNotes = val ? String(val) : undefined; break;
+        case 'progress_date': target.progressDate = val ? String(val) : undefined; break;
+        case 'updated_at': target.updatedAt = val ? String(val) : undefined; break;
+        case 'updated_by': target.updatedBy = val ? String(val) : undefined; break;
+        case 'updated_by_user_id': target.updatedByUserId = val ? String(val) : undefined; break;
+        case 'updated_action': target.updatedAction = val ? (String(val) as any) : undefined; break;
+        case 'price_basis': target.priceBasis = val ? (String(val) as any) : undefined; break;
+        case 'start_date': target.startDate = val ? String(val) : undefined; break;
+        case 'target_end_date': target.targetEndDate = val ? String(val) : undefined; break;
+        case 'actual_start_date': target.actualStartDate = val ? String(val) : undefined; break;
+        case 'actual_end_date': target.actualEndDate = val ? String(val) : undefined; break;
+        case 'plan_percent': target.planPercent = val !== null && val !== undefined ? Number(val) : undefined; break;
+        case 'weight_factor': target.weightFactor = val !== null && val !== undefined ? Number(val) : undefined; break;
+        case 'assigned_to': target.assignedTo = val ? String(val) : undefined; break;
+        case 'subcontractor': target.subcontractor = val ? String(val) : undefined; break;
+        case 'opname_status': target.opnameStatus = val ? (String(val) as any) : undefined; break;
+        case 'opname_qty': target.opnameQty = val !== null && val !== undefined ? Number(val) : undefined; break;
+        case 'opname_percent': target.opnamePercent = val !== null && val !== undefined ? Number(val) : undefined; break;
+        case 'opname_date': target.opnameDate = val ? String(val) : undefined; break;
+        case 'opname_inspector': target.opnameInspector = val ? String(val) : undefined; break;
+        case 'opname_notes': target.opnameNotes = val ? String(val) : undefined; break;
+        case 'opname_bapo_no': target.opnameBapoNo = val ? String(val) : undefined; break;
+        case 'daily_logs_json': target.dailyLogs = parseJsonSafe(val); break;
+        case 'plan_logs_json': target.planLogs = parseJsonSafe(val); break;
+      }
+    };
+
+    const parseSelectColumns = (sql: string, defaultCols: string[]): string[] => {
+      const m = sql.match(/select\s+([\s\S]+?)\s+from\s+/i);
+      if (!m || !m[1]) return defaultCols;
+      const raw = m[1].trim();
+      if (raw === '*') return defaultCols;
+      return raw.split(',').map((c) => c.trim().toLowerCase()).filter(Boolean);
+    };
+
+    const applyInsertWorkItemBySql = (
+      list: WorkItem[],
+      sql: string,
+      params: any[],
+      defaultProjectId: string
+    ) => {
+      const colMatch = sql.match(/\(([^)]+)\)\s*values/i);
+      const cols = colMatch
+        ? colMatch[1].split(',').map((c) => c.trim().toLowerCase())
+        : ALL_WORK_ITEM_COLUMNS;
+
+      const item: WorkItem = {
+        id: '',
+        projectId: defaultProjectId,
+        categoryId: 'cat-1',
+        itemNo: '',
+        description: '',
+        qty: 0,
+        unit: '',
+        unitPrice: 0,
+        totalPrice: 0,
+      };
+      cols.forEach((col, i) => {
+        if (i < params.length) {
+          setWorkItemColValue(item, col, params[i]);
+        }
+      });
+      if (!item.assignedTo && item.subcontractor) item.assignedTo = item.subcontractor;
+      if (!item.subcontractor && item.assignedTo) item.subcontractor = item.assignedTo;
+
+      const idx = list.findIndex((w) => w.id === item.id);
+      if (idx >= 0) list[idx] = item;
+      else list.push(item);
+    };
+
+    const applyUpdateWorkItemBySql = (
+      list: WorkItem[],
+      sql: string,
+      params: any[]
+    ) => {
+      const setMatch = sql.match(/\bset\s+([\s\S]+?)(?:\s+where\s+([\s\S]+))?$/i);
+      if (!setMatch) return;
+      const setClause = setMatch[1];
+      const whereClause = setMatch[2] || '';
+
+      const assignments = setClause.split(',').map((part) => part.trim()).filter(Boolean);
+      let paramIdx = 0;
+      const updates: Array<{ col: string; val: any }> = [];
+
+      assignments.forEach((assign) => {
+        const eqIdx = assign.indexOf('=');
+        if (eqIdx === -1) return;
+        const col = assign.slice(0, eqIdx).trim().toLowerCase();
+        const rhs = assign.slice(eqIdx + 1).trim();
+        let val: any;
+        if (rhs === '?') {
+          val = params[paramIdx++];
+        } else if (rhs.toLowerCase() === 'null') {
+          val = null;
+        } else if (/^'.*'$/.test(rhs)) {
+          val = rhs.slice(1, -1);
+        } else if (!isNaN(Number(rhs))) {
+          val = Number(rhs);
+        } else {
+          val = rhs;
+        }
+        updates.push({ col, val });
+      });
+
+      const hasWhereIdParam = /\bid\s*=\s*\?/i.test(whereClause);
+      if (hasWhereIdParam) {
+        const targetId = params[paramIdx] !== undefined ? params[paramIdx] : params[params.length - 1];
+        const idx = list.findIndex((w) => w.id === targetId);
+        if (idx >= 0) {
+          const cloned = { ...list[idx] };
+          updates.forEach(({ col, val }) => setWorkItemColValue(cloned, col, val));
+          list[idx] = cloned;
+        }
+      } else if (!whereClause.trim()) {
+        // Bulk update (e.g. resetPlanAndProgress)
+        list.forEach((row, i) => {
+          const cloned = { ...row };
+          updates.forEach(({ col, val }) => setWorkItemColValue(cloned, col, val));
+          list[i] = cloned;
+        });
+      }
+    };
+
     this.db = {
       run: (sql: string, params: any[] = []) => {
         const s = sql.trim().toLowerCase();
@@ -280,6 +559,21 @@ class SqliteService {
             kindOfSurvey: params[7] ?? store.vessel.kindOfSurvey,
             photoUrl: params[8] ?? store.vessel.photoUrl,
           };
+        } else if (s.startsWith('insert into vessels') || s.startsWith('insert or replace into vessels')) {
+          store.vessel = {
+            id: params[0] || store.vessel.id,
+            name: params[1] ?? store.vessel.name,
+            dimension: params[2] ?? store.vessel.dimension,
+            vesselType: params[3] ?? store.vessel.vesselType,
+            dockingType: params[4] ?? store.vessel.dockingType,
+            companyOwner: params[5] ?? store.vessel.companyOwner,
+            projectNo: params[6] ?? store.vessel.projectNo,
+            classification: params[7] ?? store.vessel.classification,
+            kindOfSurvey: params[8] ?? store.vessel.kindOfSurvey,
+            photoUrl: params[9] ?? store.vessel.photoUrl,
+          };
+        } else if (s.startsWith('delete from vessels')) {
+          store.vessel = { ...DEFAULT_VESSEL };
         } else if (s.startsWith('update projects')) {
           store.schedule = {
             id: params[10] || store.schedule.id,
@@ -295,182 +589,51 @@ class SqliteService {
             dockingDurationDays: Number(params[8] ?? store.schedule.dockingDurationDays),
             status: params[9] ?? store.schedule.status,
           };
+        } else if (s.startsWith('insert into projects') || s.startsWith('insert or replace into projects')) {
+          store.schedule = {
+            id: params[0] || store.schedule.id,
+            vesselId: params[1] ?? store.schedule.vesselId,
+            arriveBgn: params[2] ?? store.schedule.arriveBgn,
+            startContract: params[3] ?? store.schedule.startContract,
+            arrivalMeeting: params[4] ?? store.schedule.arrivalMeeting,
+            dockingDate: params[5] ?? store.schedule.dockingDate,
+            undockingDate: params[6] ?? store.schedule.undockingDate,
+            finishWork: params[7] ?? store.schedule.finishWork,
+            sailOut: params[8] ?? store.schedule.sailOut,
+            dockingPosition: params[9] ?? store.schedule.dockingPosition,
+            dockingDurationDays: Number(params[10] ?? store.schedule.dockingDurationDays),
+            status: (params[11] as any) ?? store.schedule.status,
+            actualStartContract: params[12] ? String(params[12]) : store.schedule.actualStartContract,
+            actualDockingDate: params[13] ? String(params[13]) : store.schedule.actualDockingDate,
+            actualUndockingDate: params[14] ? String(params[14]) : store.schedule.actualUndockingDate,
+            actualFinishWork: params[15] ? String(params[15]) : store.schedule.actualFinishWork,
+            actualSailOut: params[16] ? String(params[16]) : store.schedule.actualSailOut,
+          };
+        } else if (s.startsWith('delete from projects')) {
+          store.schedule = { ...DEFAULT_SCHEDULE };
+        } else if (s.startsWith('insert into work_categories') || s.startsWith('insert or replace into work_categories') || s.startsWith('insert or ignore into work_categories')) {
+          const cat = {
+            id: String(params[0]),
+            code: String(params[1]),
+            name: String(params[2]),
+            sortOrder: Number(params[3] || 0),
+          };
+          const idx = store.categories.findIndex((c) => c.id === cat.id);
+          if (idx >= 0) {
+            if (!s.startsWith('insert or ignore')) store.categories[idx] = cat;
+          } else {
+            store.categories.push(cat);
+          }
+        } else if (s.startsWith('delete from work_categories')) {
+          store.categories = [];
         } else if (s.startsWith('insert into work_items') || s.startsWith('insert or replace into work_items')) {
-          const item: WorkItem = {
-            id: String(params[0]),
-            projectId: String(params[1]),
-            categoryId: String(params[2]),
-            itemNo: String(params[3]),
-            description: String(params[4]),
-            type: String(params[5] || ''),
-            d1: String(params[6] || ''),
-            d2: String(params[7] || ''),
-            d3: String(params[8] || ''),
-            dLen: String(params[9] || ''),
-            d4: String(params[10] || ''),
-            qty: Number(params[11] || 0),
-            unit: String(params[12] || ''),
-            weightKg: Number(params[13] || 0),
-            unitPrice: Number(params[14] || 0),
-            totalPrice: Number(params[15] || 0),
-            remark: String(params[16] || ''),
-            remark2: String(params[17] || ''),
-            isCompleted: Boolean(params[18]),
-            notes: String(params[19] || ''),
-            parentId: params[20] ? String(params[20]) : undefined,
-            itemLevel: params[21] !== undefined ? Number(params[21]) : undefined,
-            isAreaHeader: Boolean(params[22]),
-            progressPercent: params[23] !== undefined ? Number(params[23]) : (params[18] ? 100 : 0),
-            progressQty: params[24] !== undefined ? Number(params[24]) : undefined,
-            progressNotes: params[25] ? String(params[25]) : undefined,
-            progressDate: params[26] ? String(params[26]) : undefined,
-            updatedAt: params[27] ? String(params[27]) : undefined,
-            updatedBy: params[28] ? String(params[28]) : undefined,
-            updatedByUserId: params[29] ? String(params[29]) : undefined,
-            updatedAction: params[30] ? String(params[30]) as any : undefined,
-            priceBasis: params[31] ? (String(params[31]) as any) : undefined,
-            startDate: params[32] ? String(params[32]) : undefined,
-            targetEndDate: params[33] ? String(params[33]) : undefined,
-            actualStartDate: params[34] ? String(params[34]) : undefined,
-            actualEndDate: params[35] ? String(params[35]) : undefined,
-            planPercent: params[36] !== undefined ? Number(params[36]) : undefined,
-            weightFactor: params[37] !== undefined ? Number(params[37]) : undefined,
-            assignedTo: params[38] ? String(params[38]) : undefined,
-            subcontractor: params[39] ? String(params[39]) : undefined,
-            dailyLogs: params[47] ? (typeof params[47] === 'string' ? (JSON.parse(params[47]) || {}) : params[47]) : undefined,
-            planLogs: params[48] ? (typeof params[48] === 'string' ? (JSON.parse(params[48]) || {}) : params[48]) : undefined,
-          };
-          const idx = store.workItems.findIndex((w) => w.id === item.id);
-          if (idx >= 0) store.workItems[idx] = item;
-          else store.workItems.push(item);
+          applyInsertWorkItemBySql(store.workItems, sql, params, store.schedule.id || 'proj-f049');
         } else if (s.startsWith('update work_items set')) {
-          const targetId = params[params.length - 1];
-          const idx = store.workItems.findIndex((w) => w.id === targetId);
-          if (idx >= 0) {
-            store.workItems[idx] = {
-              ...store.workItems[idx],
-              categoryId: String(params[0]),
-              itemNo: String(params[1]),
-              description: String(params[2]),
-              type: String(params[3] || ''),
-              d1: String(params[4] || ''),
-              d2: String(params[5] || ''),
-              d3: String(params[6] || ''),
-              dLen: String(params[7] || ''),
-              d4: String(params[8] || ''),
-              qty: Number(params[9] || 0),
-              unit: String(params[10] || ''),
-              weightKg: Number(params[11] || 0),
-              unitPrice: Number(params[12] || 0),
-              totalPrice: Number(params[13] || 0),
-              remark: String(params[14] || ''),
-              remark2: String(params[15] || ''),
-              isCompleted: Boolean(params[16]),
-              notes: String(params[17] || ''),
-              parentId: params[18] ? String(params[18]) : undefined,
-              itemLevel: params[19] !== undefined ? Number(params[19]) : undefined,
-              isAreaHeader: Boolean(params[20]),
-              progressPercent: params[21] !== undefined ? Number(params[21]) : (params[16] ? 100 : 0),
-              progressQty: params[22] !== undefined ? Number(params[22]) : undefined,
-              progressNotes: params[23] ? String(params[23]) : undefined,
-              progressDate: params[24] ? String(params[24]) : undefined,
-              updatedAt: params[25] ? String(params[25]) : undefined,
-              updatedBy: params[26] ? String(params[26]) : undefined,
-              updatedByUserId: params[27] ? String(params[27]) : undefined,
-              updatedAction: params[28] ? String(params[28]) as any : undefined,
-              priceBasis: params[29] ? (String(params[29]) as any) : undefined,
-            };
-          }
+          applyUpdateWorkItemBySql(store.workItems, sql, params);
         } else if (s.startsWith('insert into opname_work_items') || s.startsWith('insert or replace into opname_work_items')) {
-          const item: WorkItem = {
-            id: String(params[0]),
-            projectId: 'proj-f049',
-            categoryId: String(params[1]),
-            itemNo: String(params[2]),
-            description: String(params[3]),
-            type: String(params[4] || ''),
-            d1: String(params[5] || ''),
-            d2: String(params[6] || ''),
-            d3: String(params[7] || ''),
-            dLen: String(params[8] || ''),
-            d4: String(params[9] || ''),
-            qty: Number(params[10] || 0),
-            unit: String(params[11] || ''),
-            weightKg: Number(params[12] || 0),
-            unitPrice: Number(params[13] || 0),
-            totalPrice: Number(params[14] || 0),
-            remark: String(params[15] || ''),
-            remark2: String(params[16] || ''),
-            isCompleted: Boolean(params[17]),
-            notes: String(params[18] || ''),
-            parentId: params[19] ? String(params[19]) : undefined,
-            itemLevel: params[20] !== undefined ? Number(params[20]) : undefined,
-            isAreaHeader: Boolean(params[21]),
-            progressPercent: params[22] !== undefined ? Number(params[22]) : (params[17] ? 100 : 0),
-            progressQty: params[23] !== undefined ? Number(params[23]) : undefined,
-            progressNotes: params[24] ? String(params[24]) : undefined,
-            progressDate: params[25] ? String(params[25]) : undefined,
-            updatedAt: params[26] ? String(params[26]) : undefined,
-            updatedBy: params[27] ? String(params[27]) : undefined,
-            updatedByUserId: params[28] ? String(params[28]) : undefined,
-            updatedAction: params[29] ? (String(params[29]) as any) : undefined,
-            priceBasis: params[30] ? (String(params[30]) as any) : undefined,
-            startDate: params[31] ? String(params[31]) : undefined,
-            targetEndDate: params[32] ? String(params[32]) : undefined,
-            actualEndDate: params[33] ? String(params[33]) : undefined,
-            planPercent: params[34] !== undefined ? Number(params[34]) : undefined,
-            weightFactor: params[35] !== undefined ? Number(params[35]) : undefined,
-            assignedTo: params[36] ? String(params[36]) : (params[37] ? String(params[37]) : undefined),
-            subcontractor: params[37] ? String(params[37]) : (params[36] ? String(params[36]) : undefined),
-            opnameStatus: params[38] ? (String(params[38]) as any) : undefined,
-            opnameQty: params[39] !== undefined ? Number(params[39]) : undefined,
-            opnamePercent: params[40] !== undefined ? Number(params[40]) : undefined,
-            opnameDate: params[41] ? String(params[41]) : undefined,
-            opnameInspector: params[42] ? String(params[42]) : undefined,
-            opnameNotes: params[43] ? String(params[43]) : undefined,
-            opnameBapoNo: params[44] ? String(params[44]) : undefined,
-          };
-          const idx = store.opnameWorkItems.findIndex((w) => w.id === item.id);
-          if (idx >= 0) store.opnameWorkItems[idx] = item;
-          else store.opnameWorkItems.push(item);
+          applyInsertWorkItemBySql(store.opnameWorkItems, sql, params, store.schedule.id || 'proj-f049');
         } else if (s.startsWith('update opname_work_items set')) {
-          const targetId = params[params.length - 1];
-          const idx = store.opnameWorkItems.findIndex((w) => w.id === targetId);
-          if (idx >= 0) {
-            store.opnameWorkItems[idx] = {
-              ...store.opnameWorkItems[idx],
-              categoryId: String(params[0]),
-              itemNo: String(params[1]),
-              description: String(params[2]),
-              type: String(params[3] || ''),
-              d1: String(params[4] || ''),
-              d2: String(params[5] || ''),
-              d3: String(params[6] || ''),
-              dLen: String(params[7] || ''),
-              d4: String(params[8] || ''),
-              qty: Number(params[9] || 0),
-              unit: String(params[10] || ''),
-              weightKg: Number(params[11] || 0),
-              unitPrice: Number(params[12] || 0),
-              totalPrice: Number(params[13] || 0),
-              remark: String(params[14] || ''),
-              remark2: String(params[15] || ''),
-              isCompleted: Boolean(params[16]),
-              notes: String(params[17] || ''),
-              parentId: params[18] ? String(params[18]) : undefined,
-              itemLevel: params[19] !== undefined ? Number(params[19]) : undefined,
-              isAreaHeader: Boolean(params[20]),
-              progressPercent: params[21] !== undefined ? Number(params[21]) : (params[16] ? 100 : 0),
-              progressQty: params[22] !== undefined ? Number(params[22]) : undefined,
-              progressNotes: params[23] ? String(params[23]) : undefined,
-              progressDate: params[24] ? String(params[24]) : undefined,
-              updatedAt: params[25] ? String(params[25]) : undefined,
-              updatedBy: params[26] ? String(params[26]) : undefined,
-              updatedByUserId: params[27] ? String(params[27]) : undefined,
-              updatedAction: params[28] ? String(params[28]) as any : undefined,
-              priceBasis: params[29] ? (String(params[29]) as any) : undefined,
-            };
-          }
+          applyUpdateWorkItemBySql(store.opnameWorkItems, sql, params);
         } else if (s.startsWith('delete from opname_work_items')) {
           if (params && params.length > 0 && params[0]) {
             const id = params[0];
@@ -553,22 +716,27 @@ class SqliteService {
           const item = store.defectSurveys.find((d) => d.id === surveyId);
           if (item) item.transferredToWorkItemId = workItemId;
         } else if (s.startsWith('delete from defect_surveys')) {
-          const id = params[0];
-          store.defectSurveys = store.defectSurveys.filter((d) => d.id !== id);
-        } else if (s.startsWith('update signatures')) {
+          if (params && params.length > 0 && params[0]) {
+            const id = params[0];
+            store.defectSurveys = store.defectSurveys.filter((d) => d.id !== id);
+          } else {
+            store.defectSurveys = [];
+          }
+        } else if (s.startsWith('update signatures') || s.startsWith('insert into signatures') || s.startsWith('insert or replace into signatures')) {
           store.signatures = {
-            preparedByName: String(params[0]),
-            preparedByTitle: String(params[1]),
-            reviewedByName: String(params[2]),
-            reviewedByTitle: String(params[3]),
-            verifiedByName: String(params[4]),
-            verifiedByTitle: String(params[5]),
+            preparedByName: String(params[0] ?? store.signatures.preparedByName),
+            preparedByTitle: String(params[1] ?? store.signatures.preparedByTitle),
+            reviewedByName: String(params[2] ?? store.signatures.reviewedByName),
+            reviewedByTitle: String(params[3] ?? store.signatures.reviewedByTitle),
+            verifiedByName: String(params[4] ?? store.signatures.verifiedByName),
+            verifiedByTitle: String(params[5] ?? store.signatures.verifiedByTitle),
           };
         } else if (s.includes('drop table')) {
           store.vessel = { ...DEFAULT_VESSEL };
           store.schedule = { ...DEFAULT_SCHEDULE };
           store.categories = [...DEFAULT_CATEGORIES];
           store.workItems = [...DEFAULT_WORK_ITEMS];
+          store.opnameWorkItems = [];
           store.defectSurveys = [...DEFAULT_DEFECT_SURVEYS];
           store.signatures = { ...DEFAULT_SIGNATURES };
         }
@@ -576,18 +744,30 @@ class SqliteService {
       },
       exec: (sql: string) => {
         const s = sql.trim().toLowerCase();
-        if (s.startsWith('select * from vessels')) {
+        if (s.includes('from vessels')) {
           const v = store.vessel;
           return [{
-            columns: ['id', 'name', 'dimension', 'vessel_type', 'docking_type', 'company_owner', 'project_no', 'classification', 'kind_of_survey'],
-            values: [[v.id, v.name, v.dimension, v.vesselType, v.dockingType, v.companyOwner, v.projectNo, v.classification, v.kindOfSurvey]],
+            columns: ['id', 'name', 'dimension', 'vessel_type', 'docking_type', 'company_owner', 'project_no', 'classification', 'kind_of_survey', 'photo_url'],
+            values: [[v.id, v.name, v.dimension, v.vesselType, v.dockingType, v.companyOwner, v.projectNo, v.classification, v.kindOfSurvey, v.photoUrl || '']],
           }];
         }
-        if (s.startsWith('select * from projects')) {
+        if (s.includes('from projects')) {
           const p = store.schedule;
           return [{
-            columns: ['id', 'vessel_id', 'arrive_bgn', 'start_contract', 'arrival_meeting', 'docking_date', 'undocking_date', 'finish_work', 'sail_out', 'docking_position', 'docking_duration_days', 'status'],
-            values: [[p.id, p.vesselId, p.arriveBgn, p.startContract, p.arrivalMeeting, p.dockingDate, p.undockingDate, p.finishWork, p.sailOut, p.dockingPosition, p.dockingDurationDays, p.status]],
+            columns: [
+              'id', 'vessel_id', 'arrive_bgn', 'start_contract', 'arrival_meeting',
+              'docking_date', 'undocking_date', 'finish_work', 'sail_out',
+              'docking_position', 'docking_duration_days', 'status',
+              'actual_start_contract', 'actual_docking_date', 'actual_undocking_date',
+              'actual_finish_work', 'actual_sail_out',
+            ],
+            values: [[
+              p.id, p.vesselId, p.arriveBgn, p.startContract, p.arrivalMeeting,
+              p.dockingDate, p.undockingDate, p.finishWork, p.sailOut,
+              p.dockingPosition, p.dockingDurationDays, p.status,
+              p.actualStartContract || '', p.actualDockingDate || '', p.actualUndockingDate || '',
+              p.actualFinishWork || '', p.actualSailOut || '',
+            ]],
           }];
         }
         if (s.includes('from work_categories')) {
@@ -597,21 +777,17 @@ class SqliteService {
           }];
         }
         if (s.includes('from opname_work_items')) {
+          const cols = parseSelectColumns(sql, ALL_WORK_ITEM_COLUMNS);
           return [{
-            columns: ['id', 'project_id', 'category_id', 'item_no', 'description', 'type', 'd1', 'd2', 'd3', 'd4', 'qty', 'unit', 'weight_kg', 'unit_price', 'total_price', 'remark', 'remark2', 'is_completed', 'notes'],
-            values: store.opnameWorkItems.map((w) => [
-              w.id, w.projectId, w.categoryId, w.itemNo, w.description, w.type, w.d1, w.d2, w.d3, w.d4,
-              w.qty, w.unit, w.weightKg, w.unitPrice, w.totalPrice, w.remark, w.remark2, w.isCompleted ? 1 : 0, w.notes,
-            ]),
+            columns: cols,
+            values: store.opnameWorkItems.map((w) => cols.map((col) => getWorkItemColValue(w, col))),
           }];
         }
         if (s.includes('from work_items')) {
+          const cols = parseSelectColumns(sql, ALL_WORK_ITEM_COLUMNS);
           return [{
-            columns: ['id', 'project_id', 'category_id', 'item_no', 'description', 'type', 'd1', 'd2', 'd3', 'd4', 'qty', 'unit', 'weight_kg', 'unit_price', 'total_price', 'remark', 'remark2', 'is_completed', 'notes'],
-            values: store.workItems.map((w) => [
-              w.id, w.projectId, w.categoryId, w.itemNo, w.description, w.type, w.d1, w.d2, w.d3, w.d4,
-              w.qty, w.unit, w.weightKg, w.unitPrice, w.totalPrice, w.remark, w.remark2, w.isCompleted ? 1 : 0, w.notes,
-            ]),
+            columns: cols,
+            values: store.workItems.map((w) => cols.map((col) => getWorkItemColValue(w, col))),
           }];
         }
         if (s.includes('from defect_surveys')) {
@@ -1066,6 +1242,9 @@ class SqliteService {
       this.db.run('ALTER TABLE work_items ADD COLUMN opname_bapo_no TEXT;');
     } catch {}
     try {
+      this.db.run('ALTER TABLE opname_work_items ADD COLUMN d_len TEXT;');
+    } catch {}
+    try {
       this.db.run('ALTER TABLE opname_work_items ADD COLUMN actual_start_date TEXT;');
     } catch {}
     try {
@@ -1208,7 +1387,11 @@ class SqliteService {
 
     // Seed Project Schedule
     const stmtProj = this.db.prepare(`
-      INSERT OR REPLACE INTO projects VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT OR REPLACE INTO projects (
+        id, vessel_id, arrive_bgn, start_contract, arrival_meeting,
+        docking_date, undocking_date, finish_work, sail_out,
+        docking_position, docking_duration_days, status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     stmtProj.run([
       DEFAULT_SCHEDULE.id,
@@ -1574,6 +1757,104 @@ class SqliteService {
     return DEFAULT_CATEGORIES;
   }
 
+  private mapSqlRowsToWorkItems(columns: string[], values: any[][]): WorkItem[] {
+    const colIdx = new Map<string, number>();
+    columns.forEach((c, idx) => colIdx.set(String(c).toLowerCase(), idx));
+    const get = (row: any[], col: string) => {
+      const idx = colIdx.get(col);
+      return idx !== undefined ? row[idx] : undefined;
+    };
+
+    return values.map((r) => {
+      const rawComp = get(r, 'is_completed');
+      const isComp = Boolean(rawComp);
+      const rawPctVal = get(r, 'progress_percent');
+      const rawPct = rawPctVal !== null && rawPctVal !== undefined ? Number(rawPctVal) : undefined;
+      const progressPercent = rawPct !== undefined ? rawPct : (isComp ? 100 : 0);
+
+      let dailyLogs: Record<string, any> = {};
+      const rawDaily = get(r, 'daily_logs_json');
+      if (rawDaily) {
+        try {
+          dailyLogs = JSON.parse(String(rawDaily)) || {};
+        } catch {
+          dailyLogs = {};
+        }
+      }
+
+      let planLogs: Record<string, number> = {};
+      const rawPlan = get(r, 'plan_logs_json');
+      if (rawPlan) {
+        try {
+          planLogs = JSON.parse(String(rawPlan)) || {};
+        } catch {
+          planLogs = {};
+        }
+      }
+
+      const rawItemLevel = get(r, 'item_level');
+      const rawProgressQty = get(r, 'progress_qty');
+      const rawPlanPercent = get(r, 'plan_percent');
+      const rawWeightFactor = get(r, 'weight_factor');
+      const rawAssignedTo = get(r, 'assigned_to');
+      const rawSubcontractor = get(r, 'subcontractor');
+      const rawOpnameQty = get(r, 'opname_qty');
+      const rawOpnamePercent = get(r, 'opname_percent');
+
+      return {
+        id: String(get(r, 'id') ?? ''),
+        projectId: String(get(r, 'project_id') ?? 'proj-f049'),
+        categoryId: String(get(r, 'category_id') ?? 'cat-1'),
+        itemNo: String(get(r, 'item_no') ?? ''),
+        description: String(get(r, 'description') ?? ''),
+        type: String(get(r, 'type') || ''),
+        d1: String(get(r, 'd1') || ''),
+        d2: String(get(r, 'd2') || ''),
+        d3: String(get(r, 'd3') || ''),
+        dLen: String(get(r, 'd_len') || ''),
+        d4: String(get(r, 'd4') || ''),
+        qty: Number(get(r, 'qty') || 0),
+        unit: String(get(r, 'unit') || ''),
+        weightKg: Number(get(r, 'weight_kg') || 0),
+        unitPrice: Number(get(r, 'unit_price') || 0),
+        totalPrice: Number(get(r, 'total_price') || 0),
+        remark: String(get(r, 'remark') || ''),
+        remark2: String(get(r, 'remark2') || ''),
+        isCompleted: isComp,
+        notes: String(get(r, 'notes') || ''),
+        parentId: get(r, 'parent_id') ? String(get(r, 'parent_id')) : undefined,
+        itemLevel: rawItemLevel !== null && rawItemLevel !== undefined ? (Number(rawItemLevel) as any) : undefined,
+        isAreaHeader: Boolean(get(r, 'is_area_header')),
+        progressPercent,
+        progressQty: rawProgressQty !== null && rawProgressQty !== undefined ? Number(rawProgressQty) : undefined,
+        progressNotes: get(r, 'progress_notes') ? String(get(r, 'progress_notes')) : undefined,
+        progressDate: get(r, 'progress_date') ? String(get(r, 'progress_date')) : undefined,
+        updatedAt: get(r, 'updated_at') ? String(get(r, 'updated_at')) : undefined,
+        updatedBy: get(r, 'updated_by') ? String(get(r, 'updated_by')) : undefined,
+        updatedByUserId: get(r, 'updated_by_user_id') ? String(get(r, 'updated_by_user_id')) : undefined,
+        updatedAction: get(r, 'updated_action') ? (String(get(r, 'updated_action')) as any) : undefined,
+        priceBasis: get(r, 'price_basis') ? (String(get(r, 'price_basis')) as 'qty' | 'weight') : undefined,
+        startDate: get(r, 'start_date') ? String(get(r, 'start_date')) : undefined,
+        targetEndDate: get(r, 'target_end_date') ? String(get(r, 'target_end_date')) : undefined,
+        actualStartDate: get(r, 'actual_start_date') ? String(get(r, 'actual_start_date')) : undefined,
+        actualEndDate: get(r, 'actual_end_date') ? String(get(r, 'actual_end_date')) : undefined,
+        planPercent: rawPlanPercent !== null && rawPlanPercent !== undefined ? Number(rawPlanPercent) : undefined,
+        weightFactor: rawWeightFactor !== null && rawWeightFactor !== undefined ? Number(rawWeightFactor) : undefined,
+        assignedTo: rawAssignedTo ? String(rawAssignedTo) : (rawSubcontractor ? String(rawSubcontractor) : undefined),
+        subcontractor: rawSubcontractor ? String(rawSubcontractor) : (rawAssignedTo ? String(rawAssignedTo) : undefined),
+        opnameStatus: get(r, 'opname_status') ? (String(get(r, 'opname_status')) as any) : undefined,
+        opnameQty: rawOpnameQty !== null && rawOpnameQty !== undefined ? Number(rawOpnameQty) : undefined,
+        opnamePercent: rawOpnamePercent !== null && rawOpnamePercent !== undefined ? Number(rawOpnamePercent) : undefined,
+        opnameDate: get(r, 'opname_date') ? String(get(r, 'opname_date')) : undefined,
+        opnameInspector: get(r, 'opname_inspector') ? String(get(r, 'opname_inspector')) : undefined,
+        opnameNotes: get(r, 'opname_notes') ? String(get(r, 'opname_notes')) : undefined,
+        opnameBapoNo: get(r, 'opname_bapo_no') ? String(get(r, 'opname_bapo_no')) : undefined,
+        dailyLogs,
+        planLogs,
+      };
+    });
+  }
+
   public getWorkItems(): WorkItem[] {
     if (!this.db) return DEFAULT_WORK_ITEMS;
     try {
@@ -1582,118 +1863,15 @@ class SqliteService {
         FROM work_items
       `);
       if (res.length > 0) {
-        return res[0].values.map((r) => {
-          const isComp = Boolean(r[18]);
-          const rawPct = r[23] !== null && r[23] !== undefined ? Number(r[23]) : undefined;
-          const progressPercent = rawPct !== undefined ? rawPct : (isComp ? 100 : 0);
-          let dailyLogs: Record<string, any> = {};
-          if (r[47]) {
-            try {
-              dailyLogs = JSON.parse(String(r[47])) || {};
-            } catch (e) {
-              dailyLogs = {};
-            }
-          }
-
-          let planLogs: Record<string, number> = {};
-          if (r[48]) {
-            try {
-              planLogs = JSON.parse(String(r[48])) || {};
-            } catch (e) {
-              planLogs = {};
-            }
-          }
-
-          return {
-            id: String(r[0]),
-            projectId: String(r[1]),
-            categoryId: String(r[2]),
-            itemNo: String(r[3]),
-            description: String(r[4]),
-            type: String(r[5] || ''),
-            d1: String(r[6] || ''),
-            d2: String(r[7] || ''),
-            d3: String(r[8] || ''),
-            dLen: String(r[9] || ''),
-            d4: String(r[10] || ''),
-            qty: Number(r[11] || 0),
-            unit: String(r[12] || ''),
-            weightKg: Number(r[13] || 0),
-            unitPrice: Number(r[14] || 0),
-            totalPrice: Number(r[15] || 0),
-            remark: String(r[16] || ''),
-            remark2: String(r[17] || ''),
-            isCompleted: isComp,
-            notes: String(r[19] || ''),
-            parentId: r[20] ? String(r[20]) : undefined,
-            itemLevel: r[21] !== null && r[21] !== undefined ? Number(r[21]) : undefined,
-            isAreaHeader: Boolean(r[22]),
-            progressPercent,
-            progressQty: r[24] !== null && r[24] !== undefined ? Number(r[24]) : undefined,
-            progressNotes: r[25] ? String(r[25]) : undefined,
-            progressDate: r[26] ? String(r[26]) : undefined,
-            updatedAt: r[27] ? String(r[27]) : undefined,
-            updatedBy: r[28] ? String(r[28]) : undefined,
-            updatedByUserId: r[29] ? String(r[29]) : undefined,
-            updatedAction: r[30] ? (String(r[30]) as any) : undefined,
-            priceBasis: r[31] ? (String(r[31]) as 'qty' | 'weight') : undefined,
-            startDate: r[32] ? String(r[32]) : undefined,
-            targetEndDate: r[33] ? String(r[33]) : undefined,
-            actualStartDate: r[34] ? String(r[34]) : undefined,
-            actualEndDate: r[35] ? String(r[35]) : undefined,
-            planPercent: r[36] !== null && r[36] !== undefined ? Number(r[36]) : undefined,
-            weightFactor: r[37] !== null && r[37] !== undefined ? Number(r[37]) : undefined,
-            assignedTo: r[38] ? String(r[38]) : (r[39] ? String(r[39]) : undefined),
-            subcontractor: r[39] ? String(r[39]) : (r[38] ? String(r[38]) : undefined),
-            opnameStatus: r[40] ? (String(r[40]) as any) : undefined,
-            opnameQty: r[41] !== null && r[41] !== undefined ? Number(r[41]) : undefined,
-            opnamePercent: r[42] !== null && r[42] !== undefined ? Number(r[42]) : undefined,
-            opnameDate: r[43] ? String(r[43]) : undefined,
-            opnameInspector: r[44] ? String(r[44]) : undefined,
-            opnameNotes: r[45] ? String(r[45]) : undefined,
-            opnameBapoNo: r[46] ? String(r[46]) : undefined,
-            dailyLogs,
-            planLogs,
-          };
-        });
+        return this.mapSqlRowsToWorkItems(res[0].columns, res[0].values);
       }
       return [];
     } catch (e) {
-      // Fallback query if new columns don't exist in existing loaded binary
+      // Fallback query if newer columns don't exist in an older loaded binary
       try {
-        const resOld = this.db.exec(`
-          SELECT id, project_id, category_id, item_no, description, type, d1, d2, d3, d4, qty, unit, weight_kg, unit_price, total_price, remark, remark2, is_completed, notes, parent_id, item_level, is_area_header
-          FROM work_items
-        `);
+        const resOld = this.db.exec(`SELECT * FROM work_items`);
         if (resOld.length > 0) {
-          return resOld[0].values.map((r) => {
-            const isComp = Boolean(r[17]);
-            return {
-              id: String(r[0]),
-              projectId: String(r[1]),
-              categoryId: String(r[2]),
-              itemNo: String(r[3]),
-              description: String(r[4]),
-              type: String(r[5] || ''),
-              d1: String(r[6] || ''),
-              d2: String(r[7] || ''),
-              d3: String(r[8] || ''),
-              d4: String(r[9] || ''),
-              qty: Number(r[10] || 0),
-              unit: String(r[11] || ''),
-              weightKg: Number(r[12] || 0),
-              unitPrice: Number(r[13] || 0),
-              totalPrice: Number(r[14] || 0),
-              remark: String(r[15] || ''),
-              remark2: String(r[16] || ''),
-              isCompleted: isComp,
-              notes: String(r[18] || ''),
-              parentId: r[19] ? String(r[19]) : undefined,
-              itemLevel: r[20] !== null && r[20] !== undefined ? Number(r[20]) : undefined,
-              isAreaHeader: Boolean(r[21]),
-              progressPercent: isComp ? 100 : 0,
-            };
-          });
+          return this.mapSqlRowsToWorkItems(resOld[0].columns, resOld[0].values);
         }
         return [];
       } catch (err) {
@@ -2365,83 +2543,12 @@ class SqliteService {
   public getOpnameWorkItems(autoInitFromRepairList: boolean = false): WorkItem[] {
     if (!this.db) return [];
     try {
-      const res = this.db.exec(`
+      let res = this.db.exec(`
         SELECT id, project_id, category_id, item_no, description, type, d1, d2, d3, d_len, d4, qty, unit, weight_kg, unit_price, total_price, remark, remark2, is_completed, notes, parent_id, item_level, is_area_header, progress_percent, progress_qty, progress_notes, progress_date, updated_at, updated_by, updated_by_user_id, updated_action, price_basis, start_date, target_end_date, actual_start_date, actual_end_date, plan_percent, weight_factor, assigned_to, subcontractor, opname_status, opname_qty, opname_percent, opname_date, opname_inspector, opname_notes, opname_bapo_no, daily_logs_json, plan_logs_json
         FROM opname_work_items
       `);
       if (res.length > 0 && res[0].values.length > 0) {
-        return res[0].values.map((r) => {
-          const isComp = Boolean(r[18]);
-          const rawPct = r[23] !== null && r[23] !== undefined ? Number(r[23]) : undefined;
-          const progressPercent = rawPct !== undefined ? rawPct : (isComp ? 100 : 0);
-          let dailyLogs: Record<string, any> = {};
-          if (r[47]) {
-            try {
-              dailyLogs = JSON.parse(String(r[47])) || {};
-            } catch (e) {
-              dailyLogs = {};
-            }
-          }
-          let planLogs: Record<string, number> = {};
-          if (r[48]) {
-            try {
-              planLogs = JSON.parse(String(r[48])) || {};
-            } catch (e) {
-              planLogs = {};
-            }
-          }
-          return {
-            id: String(r[0]),
-            projectId: String(r[1]),
-            categoryId: String(r[2]),
-            itemNo: String(r[3]),
-            description: String(r[4]),
-            type: String(r[5] || ''),
-            d1: String(r[6] || ''),
-            d2: String(r[7] || ''),
-            d3: String(r[8] || ''),
-            dLen: String(r[9] || ''),
-            d4: String(r[10] || ''),
-            qty: Number(r[11] || 0),
-            unit: String(r[12] || ''),
-            weightKg: Number(r[13] || 0),
-            unitPrice: Number(r[14] || 0),
-            totalPrice: Number(r[15] || 0),
-            remark: String(r[16] || ''),
-            remark2: String(r[17] || ''),
-            isCompleted: isComp,
-            notes: String(r[19] || ''),
-            parentId: r[20] ? String(r[20]) : undefined,
-            itemLevel: r[21] !== null && r[21] !== undefined ? Number(r[21]) : undefined,
-            isAreaHeader: Boolean(r[22]),
-            progressPercent,
-            progressQty: r[24] !== null && r[24] !== undefined ? Number(r[24]) : undefined,
-            progressNotes: r[25] ? String(r[25]) : undefined,
-            progressDate: r[26] ? String(r[26]) : undefined,
-            updatedAt: r[27] ? String(r[27]) : undefined,
-            updatedBy: r[28] ? String(r[28]) : undefined,
-            updatedByUserId: r[29] ? String(r[29]) : undefined,
-            updatedAction: r[30] ? (String(r[30]) as any) : undefined,
-            priceBasis: r[31] ? (String(r[31]) as 'qty' | 'weight') : undefined,
-            startDate: r[32] ? String(r[32]) : undefined,
-            targetEndDate: r[33] ? String(r[33]) : undefined,
-            actualStartDate: r[34] ? String(r[34]) : undefined,
-            actualEndDate: r[35] ? String(r[35]) : undefined,
-            planPercent: r[36] !== null && r[36] !== undefined ? Number(r[36]) : undefined,
-            weightFactor: r[37] !== null && r[37] !== undefined ? Number(r[37]) : undefined,
-            assignedTo: r[38] ? String(r[38]) : (r[39] ? String(r[39]) : undefined),
-            subcontractor: r[39] ? String(r[39]) : (r[38] ? String(r[38]) : undefined),
-            opnameStatus: r[40] ? (String(r[40]) as any) : undefined,
-            opnameQty: r[41] !== null && r[41] !== undefined ? Number(r[41]) : undefined,
-            opnamePercent: r[42] !== null && r[42] !== undefined ? Number(r[42]) : undefined,
-            opnameDate: r[43] ? String(r[43]) : undefined,
-            opnameInspector: r[44] ? String(r[44]) : undefined,
-            opnameNotes: r[45] ? String(r[45]) : undefined,
-            opnameBapoNo: r[46] ? String(r[46]) : undefined,
-            dailyLogs,
-            planLogs,
-          };
-        });
+        return this.mapSqlRowsToWorkItems(res[0].columns, res[0].values);
       }
 
       // If opname table is empty, and autoInit is enabled, seed it once from repair list
@@ -2459,6 +2566,12 @@ class SqliteService {
         }
       }
     } catch (e) {
+      try {
+        const resOld = this.db.exec(`SELECT * FROM opname_work_items`);
+        if (resOld.length > 0 && resOld[0].values.length > 0) {
+          return this.mapSqlRowsToWorkItems(resOld[0].columns, resOld[0].values);
+        }
+      } catch {}
       console.warn('getOpnameWorkItems query error', e);
     }
     return [];
