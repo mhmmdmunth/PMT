@@ -12,6 +12,7 @@ import {
 
 export type { ProjectMaterialEstimate };
 import { TonnageCalculator } from '../utils/tonnageCalculator';
+import { notifyCloudDirty } from './projectExtrasSync';
 
 const MATERIAL_STORAGE_PREFIX = 'shipyard_material_estimates_v1_';
 
@@ -367,10 +368,13 @@ export const materialEstimationService = {
     return [];
   },
 
-  saveMaterialEstimates(projectId: string, items: ProjectMaterialEstimate[]): void {
+  saveMaterialEstimates(projectId: string, items: ProjectMaterialEstimate[], options?: { silent?: boolean }): void {
     if (!projectId) return;
     try {
       localStorage.setItem(`${MATERIAL_STORAGE_PREFIX}${projectId}`, JSON.stringify(items));
+      if (!options?.silent) {
+        notifyCloudDirty(projectId);
+      }
     } catch (e) {
       console.warn('Failed to save project material estimates to storage:', e);
     }

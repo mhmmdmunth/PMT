@@ -2,10 +2,10 @@
   "entities": {
     "ProjectData": {
       "title": "ProjectData",
-      "description": "Shipyard project data storage including vessel, schedule, categories, work items, and surveys.",
+      "description": "Complete shipyard project document stored in Firestore so AI Studio and deployed web domains (e.g. Vercel) stay 100% identical.",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
+        "id": { "type": "string", "maxLength": 128 },
         "vessel": { "type": "object" },
         "schedule": { "type": "object" },
         "categories": { "type": "array" },
@@ -13,7 +13,13 @@
         "opnameItems": { "type": "array" },
         "defectSurveys": { "type": "array" },
         "signatures": { "type": "object" },
-        "updatedAt": { "type": "string", "format": "date-time" }
+        "status": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "lastModified": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "lastClientId": { "type": "string", "maxLength": 128 },
+        "isDeleted": { "type": "boolean" },
+        "extras": { "type": "object" }
       },
       "required": ["id"]
     }
@@ -21,7 +27,7 @@
   "firestore": {
     "/projects/{projectId}": {
       "schema": { "$ref": "#/entities/ProjectData" },
-      "description": "Project document storing collaborative shipyard repair data for multi-user access."
+      "description": "Project document storing complete collaborative shipyard repair, opname, survey, material, resource, satisfaction note, and RAB data."
     }
   }
 }

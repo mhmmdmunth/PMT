@@ -16,9 +16,13 @@ import {
   BARGE_TEMPLATE,
   TANKER_TEMPLATE,
 } from '../data/shipyardTemplates';
+import { firebaseSyncService, CLIENT_INSTANCE_ID } from './firebaseSyncService';
+import { collectProjectExtras, applyProjectExtras } from './projectExtrasSync';
 
 const PROJECTS_STORAGE_KEY = 'shipyard_multi_projects_v1';
 const ACTIVE_PROJECT_ID_KEY = 'shipyard_active_project_id_v1';
+
+const INITIAL_TEMPLATE_IDS = new Set(['proj-f049', 'proj-bg300', 'proj-mtborneo']);
 
 export const INITIAL_SHIPYARD_PROJECTS: ShipyardProject[] = [
   {
@@ -72,8 +76,11 @@ class ProjectService {
   private projects: ShipyardProject[] = [];
   private activeProjectId: string = 'proj-f049';
   private listeners: Set<() => void> = new Set();
+  public readonly hadLocalProjectsOnBoot: boolean;
 
   constructor() {
+    this.hadLocalProjectsOnBoot =
+      typeof localStorage !== 'undefined' && Boolean(localStorage.getItem(PROJECTS_STORAGE_KEY));
     this.loadFromStorage();
   }
 
@@ -98,19 +105,6 @@ class ProjectService {
             modified = true;
           }
         });
-
-        // Ensure all categories in repair list are emptied as requested
-        const clearedKey = 'shipyard_work_items_cleared_v1';
-        if (!localStorage.getItem(clearedKey)) {
-          this.projects.forEach((p) => {
-            p.workItems = [];
-            p.totalItemsCount = 0;
-            p.progressPercent = 0;
-            p.estimatedCost = 0;
-          });
-          modified = true;
-          localStorage.setItem(clearedKey, 'true');
-        }
 
         if (modified) {
           this.saveToStorage();
@@ -334,6 +328,7 @@ class ProjectService {
     this.activeProjectId = newId;
     this.saveToStorage();
     this.notifyListeners();
+    void this.pushProjectToCloud(newProject);
     return newProject;
   }
 
@@ -347,7 +342,8 @@ class ProjectService {
       opnameItems?: WorkItem[];
       defectSurveys?: DefectSurvey[];
       signatures?: Signatures;
-    }
+    },
+    options?: { skipCloudSync?: boolean; preserveLastModified?: boolean }
   ): void {
     const idx = this.projects.findIndex((p) => p.id === id);
     if (idx >= 0) {
@@ -374,7 +370,7 @@ class ProjectService {
         defectSurveys: data.defectSurveys || p.defectSurveys,
         signatures: data.signatures || p.signatures,
         status: data.schedule?.status || p.status,
-        lastModified: new Date().toISOString(),
+        lastModified: options?.preserveLastModified ? p.lastModified : new Date().toISOString(),
         totalItemsCount: totalItems,
         progressPercent: progressAvg,
         estimatedCost: totalCost,
@@ -383,6 +379,9 @@ class ProjectService {
 
       this.saveToStorage();
       this.notifyListeners();
+      if (!options?.skipCloudSync) {
+        void this.pushProjectToCloud(updatedProjects[idx]);
+      }
     }
   }
 
@@ -396,6 +395,7 @@ class ProjectService {
     }
     this.saveToStorage();
     this.notifyListeners();
+    void firebaseSyncService.markProjectDeleted(id);
     return true;
   }
 
@@ -438,7 +438,206 @@ class ProjectService {
     this.projects.unshift(duplicated);
     this.saveToStorage();
     this.notifyListeners();
+    void this.pushProjectToCloud(duplicated);
     return duplicated;
+  }
+
+  public buildCloudPayload(proj: ShipyardProject) {
+    return {
+      id: proj.id,
+      vessel: proj.vessel,
+      schedule: proj.schedule,
+      categories: proj.categories || [...DEFAULT_CATEGORIES],
+      workItems: proj.workItems || [],
+      opnameItems: proj.opnameItems || [],
+      defectSurveys: proj.defectSurveys || [],
+      signatures: proj.signatures || { ...DEFAULT_SIGNATURES },
+      status: proj.status || proj.schedule?.status || 'Preparation',
+      createdAt: proj.createdAt || new Date().toISOString(),
+      lastModified: proj.lastModified || new Date().toISOString(),
+      extras: collectProjectExtras(proj),
+    };
+  }
+
+  public async pushProjectToCloud(proj: ShipyardProject): Promise<string | null> {
+    if (!proj?.id) return null;
+    return firebaseSyncService.saveProjectData(proj.id, this.buildCloudPayload(proj));
+  }
+
+  private normalizeCloudDocToProject(doc: any): ShipyardProject | null {
+    if (!doc || !doc.id || doc.isDeleted) return null;
+    const workItems: WorkItem[] = Array.isArray(doc.workItems) ? doc.workItems : [];
+    const opnameItems: WorkItem[] = Array.isArray(doc.opnameItems) ? doc.opnameItems : [];
+    const totalItems = workItems.length;
+    const progressAvg =
+      totalItems > 0
+        ? Number((workItems.reduce((acc, w) => acc + (w.progressPercent || 0), 0) / totalItems).toFixed(1))
+        : 0;
+    const totalCost = workItems.reduce((acc, w) => acc + (w.totalPrice || 0), 0);
+
+    const categories: WorkCategory[] =
+      Array.isArray(doc.categories) && doc.categories.length > 0 ? [...doc.categories] : [...DEFAULT_CATEGORIES];
+    DEFAULT_CATEGORIES.forEach((defCat) => {
+      if (!categories.some((c) => c.id === defCat.id || c.code === defCat.code)) {
+        categories.push({ ...defCat });
+      }
+    });
+    categories.sort((a, b) => a.sortOrder - b.sortOrder);
+
+    const vessel: VesselSpec = doc.vessel || { ...TUGBOAT_TEMPLATE.vessel, id: `vessel-${doc.id}` };
+    const schedule: ProjectSchedule = doc.schedule || { ...TUGBOAT_TEMPLATE.schedule, id: doc.id, vesselId: vessel.id };
+
+    return {
+      id: String(doc.id),
+      vessel,
+      schedule,
+      categories,
+      workItems,
+      opnameItems,
+      defectSurveys: Array.isArray(doc.defectSurveys) ? doc.defectSurveys : [],
+      signatures: doc.signatures || { ...DEFAULT_SIGNATURES },
+      status: doc.status || schedule.status || 'In Progress',
+      lastModified: doc.updatedAt || doc.lastModified || new Date().toISOString(),
+      createdAt: doc.createdAt || new Date().toISOString(),
+      totalItemsCount: totalItems,
+      progressPercent: progressAvg,
+      estimatedCost: totalCost,
+    };
+  }
+
+  /**
+   * Reconciles all local projects against Firestore collection docs so both AI Studio and deployed web domains
+   * converge to the exact same dataset.
+   */
+  public reconcileCloudProjects(cloudDocs: any[]): {
+    hydratedCount: number;
+    removedCount: number;
+    toUpload: ShipyardProject[];
+    activeProjectUpdated: boolean;
+  } {
+    if (!Array.isArray(cloudDocs)) {
+      return { hydratedCount: 0, removedCount: 0, toUpload: [], activeProjectUpdated: false };
+    }
+
+    const cloudMap = new Map<string, any>();
+    cloudDocs.forEach((d) => {
+      if (d && d.id) cloudMap.set(String(d.id), d);
+    });
+
+    const activeCloudDocs = cloudDocs.filter((d) => d && d.id && !d.isDeleted);
+    const localMap = new Map<string, ShipyardProject>();
+    this.projects.forEach((p) => localMap.set(p.id, p));
+
+    let hydratedCount = 0;
+    let removedCount = 0;
+    let activeProjectUpdated = false;
+    const toUpload: ShipyardProject[] = [];
+    const nextProjectsMap = new Map<string, ShipyardProject>();
+
+    // On a brand-new browser (e.g. Vercel first load), when Firestore already holds projects,
+    // replace untouched INITIAL_TEMPLATE placeholders with the authoritative cloud project list.
+    const replaceUntouchedDefaults = !this.hadLocalProjectsOnBoot && activeCloudDocs.length > 0;
+
+    // 1. Evaluate cloud documents first
+    cloudDocs.forEach((cloudDoc) => {
+      if (!cloudDoc?.id) return;
+      const id = String(cloudDoc.id);
+      const localProj = localMap.get(id);
+
+      if (cloudDoc.isDeleted) {
+        if (localProj) {
+          removedCount++;
+        }
+        return;
+      }
+
+      const cloudProj = this.normalizeCloudDocToProject(cloudDoc);
+      if (!cloudProj) return;
+
+      if (!localProj) {
+        nextProjectsMap.set(id, cloudProj);
+        applyProjectExtras(cloudProj, cloudDoc.extras);
+        hydratedCount++;
+        if (id === this.activeProjectId) activeProjectUpdated = true;
+        return;
+      }
+
+      const localHasWork =
+        (localProj.workItems?.length || 0) > 0 || (localProj.opnameItems?.length || 0) > 0;
+      const cloudHasWork =
+        (cloudProj.workItems?.length || 0) > 0 || (cloudProj.opnameItems?.length || 0) > 0;
+
+      const localTime = Date.parse(localProj.lastModified || localProj.createdAt || '') || 0;
+      const cloudTime = Date.parse(cloudDoc.updatedAt || cloudDoc.lastModified || cloudDoc.createdAt || '') || 0;
+
+      const isSelfWrite = cloudDoc.lastClientId === CLIENT_INSTANCE_ID;
+
+      const shouldHydrateFromCloud =
+        !isSelfWrite &&
+        (replaceUntouchedDefaults ||
+          (!localHasWork && cloudHasWork) ||
+          (!localHasWork && !this.hadLocalProjectsOnBoot) ||
+          cloudTime > localTime + 2000);
+
+      if (shouldHydrateFromCloud) {
+        nextProjectsMap.set(id, cloudProj);
+        applyProjectExtras(cloudProj, cloudDoc.extras);
+        hydratedCount++;
+        if (id === this.activeProjectId) activeProjectUpdated = true;
+      } else {
+        nextProjectsMap.set(id, localProj);
+        const missingExtrasInCloud =
+          !cloudDoc.extras && Object.keys(collectProjectExtras(localProj)).length > 0;
+        const missingCoreFieldsInCloud = !cloudDoc.categories || !cloudDoc.signatures;
+        if (
+          (localHasWork && !cloudHasWork) ||
+          (this.hadLocalProjectsOnBoot && localTime > cloudTime + 2000) ||
+          (this.hadLocalProjectsOnBoot && (missingExtrasInCloud || missingCoreFieldsInCloud))
+        ) {
+          toUpload.push(localProj);
+        }
+      }
+    });
+
+    // 2. Evaluate local-only projects (not yet in Firestore)
+    this.projects.forEach((localProj) => {
+      if (cloudMap.has(localProj.id) || nextProjectsMap.has(localProj.id)) return;
+
+      if (replaceUntouchedDefaults && INITIAL_TEMPLATE_IDS.has(localProj.id)) {
+        // Untouched placeholder on fresh domain when cloud already has real projects
+        removedCount++;
+        return;
+      }
+
+      nextProjectsMap.set(localProj.id, localProj);
+      const localHasData =
+        (localProj.workItems?.length || 0) > 0 ||
+        (localProj.opnameItems?.length || 0) > 0 ||
+        !INITIAL_TEMPLATE_IDS.has(localProj.id) ||
+        this.hadLocalProjectsOnBoot;
+
+      if (localHasData) {
+        toUpload.push(localProj);
+      }
+    });
+
+    const nextList = Array.from(nextProjectsMap.values()).sort((a, b) => {
+      const ta = Date.parse(a.lastModified || a.createdAt || '') || 0;
+      const tb = Date.parse(b.lastModified || b.createdAt || '') || 0;
+      return tb - ta;
+    });
+
+    if (nextList.length > 0 && (hydratedCount > 0 || removedCount > 0 || nextList.length !== this.projects.length)) {
+      this.projects = nextList;
+      if (!this.projects.some((p) => p.id === this.activeProjectId)) {
+        this.activeProjectId = this.projects[0].id;
+        activeProjectUpdated = true;
+      }
+      this.saveToStorage();
+      this.notifyListeners();
+    }
+
+    return { hydratedCount, removedCount, toUpload, activeProjectUpdated };
   }
 
   public subscribe(callback: () => void): () => void {

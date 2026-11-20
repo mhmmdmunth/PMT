@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   Boxes,
   Box,
@@ -57,6 +57,16 @@ export const ProjectResourceView: React.FC<ProjectResourceViewProps> = ({
   const [resources, setResources] = useState<ProjectResourceItem[]>(() =>
     projectResourceService.getResources(projectId)
   );
+
+  useEffect(() => {
+    if (!projectId) return;
+    const reload = () => {
+      setResources(projectResourceService.getResources(projectId));
+    };
+    reload();
+    window.addEventListener('shipyard-cloud-hydrated', reload);
+    return () => window.removeEventListener('shipyard-cloud-hydrated', reload);
+  }, [projectId]);
 
   // Filter & Search states
   const [activeCategoryFilter, setActiveCategoryFilter] = useState<string>('all');

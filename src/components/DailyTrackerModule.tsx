@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
+import { notifyCloudDirty } from '../services/projectExtrasSync';
 import {
   Calendar,
   Clock,
@@ -94,9 +95,26 @@ export const DailyTrackerModule: React.FC<DailyTrackerModuleProps> = ({
     ];
   });
 
+  useEffect(() => {
+    const reload = () => {
+      const saved = localStorage.getItem(`shipyard_milestones_${vessel.id || 'proj-f049'}`);
+      if (saved) {
+        try {
+          setMilestones(JSON.parse(saved));
+        } catch {
+          // ignore
+        }
+      }
+    };
+    reload();
+    window.addEventListener('shipyard-cloud-hydrated', reload);
+    return () => window.removeEventListener('shipyard-cloud-hydrated', reload);
+  }, [vessel.id]);
+
   const saveMilestones = (updatedList: ProjectMilestone[]) => {
     setMilestones(updatedList);
     localStorage.setItem(`shipyard_milestones_${vessel.id || 'proj-f049'}`, JSON.stringify(updatedList));
+    notifyCloudDirty(schedule?.id);
   };
 
   // Milestone Form States

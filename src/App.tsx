@@ -18,7 +18,8 @@ import { LoginScreen } from './components/LoginScreen';
 import { ProjectSelectionHub } from './components/ProjectSelectionHub';
 import { RepairListTable } from './components/RepairListTable';
 import { materialEstimationService } from './services/materialEstimationService';
-import { firebaseSyncService } from './services/firebaseSyncService';
+import { firebaseSyncService, CloudConnectionState, CLIENT_INSTANCE_ID } from './services/firebaseSyncService';
+import { collectProjectExtras, applyProjectExtras } from './services/projectExtrasSync';
 import { CustomDialogModal } from './components/CustomDialogModal';
 
 const OpnameVerificationTable = lazy(() =>
@@ -132,6 +133,12 @@ export default function App() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'syncing'>('saved');
   const [lastSavedTime, setLastSavedTime] = useState<Date | null>(new Date());
+  const [cloudConnectionState, setCloudConnectionState] = useState<CloudConnectionState>(
+    () => firebaseSyncService.getConnectionState().state
+  );
+  const [isCloudSyncing, setIsCloudSyncing] = useState<boolean>(false);
+  const [lastCloudSyncAt, setLastCloudSyncAt] = useState<Date | null>(null);
+  const [extrasSyncTick, setExtrasSyncTick] = useState<number>(0);
 
   // Custom dialog modal state
   const [dialogState, setDialogState] = useState<{
@@ -178,11 +185,21 @@ export default function App() {
   const isApplyingCloudUpdateRef = useRef<boolean>(false);
   const lastCloudUpdatedAtRef = useRef<string | null>(null);
   const cloudSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const currentViewRef = useRef(currentView);
+  const currentProjectIdRef = useRef<string | null>(currentProject?.id || null);
+
+  useEffect(() => {
+    currentViewRef.current = currentView;
+  }, [currentView]);
+
+  useEffect(() => {
+    currentProjectIdRef.current = currentProject?.id || null;
+  }, [currentProject?.id]);
 
   const scheduleCloudSync = useCallback(
     (
       projId: string,
-      payload: {
+      payload?: {
         vessel: VesselSpec;
         schedule: ProjectSchedule;
         categories: WorkCategory[];
@@ -195,13 +212,35 @@ export default function App() {
       if (cloudSyncTimerRef.current) {
         clearTimeout(cloudSyncTimerRef.current);
       }
-      cloudSyncTimerRef.current = setTimeout(() => {
-        firebaseSyncService.saveProjectData(projId, payload).then((savedAt) => {
-          if (savedAt) {
-            lastCloudUpdatedAtRef.current = savedAt;
-          }
-        });
-      }, 1500);
+      setSaveStatus('syncing');
+      cloudSyncTimerRef.current = setTimeout(async () => {
+        const storedProj = projectService.getProjectById(projId);
+        const fullPayload = payload
+          ? {
+              ...payload,
+              id: projId,
+              status: payload.schedule?.status || storedProj?.status || 'Preparation',
+              createdAt: storedProj?.createdAt || new Date().toISOString(),
+              lastModified: storedProj?.lastModified || new Date().toISOString(),
+              extras: collectProjectExtras({ id: projId, vessel: payload.vessel }),
+            }
+          : storedProj
+          ? projectService.buildCloudPayload(storedProj)
+          : null;
+
+        if (!fullPayload) {
+          setSaveStatus('saved');
+          return;
+        }
+
+        const savedAt = await firebaseSyncService.saveProjectData(projId, fullPayload);
+        if (savedAt) {
+          lastCloudUpdatedAtRef.current = savedAt;
+          setLastCloudSyncAt(new Date());
+          setLastSavedTime(new Date());
+        }
+        setSaveStatus('saved');
+      }, 1200);
     },
     []
   );
@@ -227,9 +266,10 @@ export default function App() {
       setDefectSurveys(d);
       setSignatures(sig);
 
-      // Also sync to active project in projectService
+      // Keep local projectService snapshot updated without triggering duplicate immediate Firestore pushes
       const activeProj = projectService.getActiveProject();
-      if (activeProj) {
+      const isCloudOrInitRead = Boolean(options?.skipCloudPush || isApplyingCloudUpdateRef.current);
+      if (activeProj && (!s?.id || s.id === activeProj.id || v?.id === activeProj.vessel?.id)) {
         const snapshotPayload = {
           vessel: v,
           schedule: s,
@@ -239,11 +279,14 @@ export default function App() {
           defectSurveys: d,
           signatures: sig,
         };
-        projectService.updateProjectData(activeProj.id, snapshotPayload);
+        projectService.updateProjectData(activeProj.id, snapshotPayload, {
+          skipCloudSync: true,
+          preserveLastModified: isCloudOrInitRead,
+        });
         setAllProjects(projectService.getAllProjects());
 
-        // Never echo incoming cloud updates back to Firestore (prevents infinite snapshot loop)
-        if (!options?.skipCloudPush && !isApplyingCloudUpdateRef.current) {
+        // Never echo incoming cloud updates or init reads back to Firestore
+        if (!isCloudOrInitRead) {
           scheduleCloudSync(activeProj.id, snapshotPayload);
         }
       }
@@ -251,14 +294,247 @@ export default function App() {
     [scheduleCloudSync]
   );
 
-  // Real-time Firestore synchronization effect for multi-user collaboration
+  // Hydrate workspace SQLite + React state from an authoritative cloud/project object without pushing back to Firestore
+  const hydrateWorkspaceFromProject = useCallback(
+    (proj: ShipyardProject, cloudExtras?: any) => {
+      isApplyingCloudUpdateRef.current = true;
+      try {
+        if (cloudExtras) {
+          applyProjectExtras(proj, cloudExtras);
+        }
+        if (sqliteService.isReady()) {
+          sqliteService.loadProjectData(proj);
+          loadDataFromSqlite({ skipCloudPush: true });
+        }
+        setCurrentProject(proj);
+        setExtrasSyncTick((t) => t + 1);
+      } finally {
+        isApplyingCloudUpdateRef.current = false;
+      }
+    },
+    [loadDataFromSqlite]
+  );
+
+  // Manual full bidirectional cloud sync (used in Hub & Header)
+  const handleForceCloudSync = useCallback(
+    async (silent = false) => {
+      setIsCloudSyncing(true);
+      try {
+        await sqliteService.init();
+        await firebaseSyncService.verifyConnection();
+        const cloudDocs = await firebaseSyncService.loadAllProjects();
+        if (!cloudDocs) {
+          if (!silent) {
+            showToast('Gagal terhubung ke Cloud Firestore. Periksa koneksi internet Anda.');
+          }
+          return;
+        }
+
+        const { hydratedCount, removedCount, toUpload, activeProjectUpdated } =
+          projectService.reconcileCloudProjects(cloudDocs);
+
+        if (toUpload.length > 0) {
+          await Promise.all(toUpload.map((p) => projectService.pushProjectToCloud(p)));
+        }
+
+        const updatedList = projectService.getAllProjects();
+        setAllProjects(updatedList);
+
+        const activeProj = projectService.getActiveProject();
+        if (activeProj) {
+          setCurrentProject(activeProj);
+          if (activeProjectUpdated || !sqliteService.hadLocalDbOnBoot || currentViewRef.current === 'workspace') {
+            const matchingDoc = cloudDocs.find((d) => d?.id === activeProj.id);
+            const currentSqlId = sqliteService.getProjectSchedule()?.id;
+            if (activeProjectUpdated || currentSqlId === activeProj.id || !sqliteService.hadLocalDbOnBoot) {
+              hydrateWorkspaceFromProject(activeProj, matchingDoc?.extras);
+            }
+          }
+        }
+
+        setLastCloudSyncAt(new Date());
+        if (!silent) {
+          showToast(
+            `Sinkronisasi Cloud selesai (${updatedList.length} proyek tersinkron${
+              hydratedCount > 0 ? `, ${hydratedCount} diperbarui` : ''
+            }${toUpload.length > 0 ? `, ${toUpload.length} diunggah` : ''}${
+              removedCount > 0 ? `, ${removedCount} dibersihkan` : ''
+            }).`
+          );
+        }
+      } finally {
+        setIsCloudSyncing(false);
+      }
+    },
+    [hydrateWorkspaceFromProject, showToast]
+  );
+
+  // Global boot + continuous multi-device Firestore collection synchronization (runs on BOTH Hub & Workspace)
+  useEffect(() => {
+    let isCancelled = false;
+
+    const unsubConn = firebaseSyncService.subscribeConnectionState((state) => {
+      setCloudConnectionState(state);
+    });
+
+    const unsubProjects = projectService.subscribe(() => {
+      setAllProjects(projectService.getAllProjects());
+      const active = projectService.getActiveProject();
+      if (active) setCurrentProject(active);
+    });
+
+    const handleDirtyExtras = (e: Event) => {
+      if (isApplyingCloudUpdateRef.current) return;
+      const customEvent = e as CustomEvent<{ projectId?: string }>;
+      const targetId = customEvent?.detail?.projectId || currentProjectIdRef.current || projectService.getActiveProject()?.id;
+      setExtrasSyncTick((t) => t + 1);
+      if (targetId) {
+        scheduleCloudSync(targetId);
+      }
+    };
+
+    const handleCloudHydrated = () => {
+      setExtrasSyncTick((t) => t + 1);
+    };
+
+    window.addEventListener('shipyard-cloud-dirty', handleDirtyExtras);
+    window.addEventListener('shipyard-cloud-hydrated', handleCloudHydrated);
+
+    // 1. Initialize SQLite & perform initial authoritative Firestore reconciliation
+    const initAndSyncCloud = async () => {
+      await sqliteService.init();
+      if (isCancelled) return;
+
+      // Flush local SQLite into matching projectService entry ONLY if it actually holds local edits not yet reflected
+      if (sqliteService.hadLocalDbOnBoot) {
+        const sqlV = sqliteService.getVessel();
+        const sqlS = sqliteService.getProjectSchedule();
+        const sqlC = sqliteService.getWorkCategories();
+        const sqlW = sqliteService.getWorkItems();
+        const sqlOp = sqliteService.getOpnameWorkItems();
+        const sqlD = sqliteService.getDefectSurveys();
+        const sqlSig = sqliteService.getSignatures();
+
+        const targetProj =
+          (sqlS?.id ? projectService.getProjectById(sqlS.id) : null) ||
+          projectService.getAllProjects().find((p) => p.vessel?.id === sqlV?.id) ||
+          projectService.getActiveProject();
+
+        if (targetProj) {
+          const itemCountChanged =
+            sqlW.length !== (targetProj.workItems?.length || 0) ||
+            sqlOp.length !== (targetProj.opnameItems?.length || 0) ||
+            sqlD.length !== (targetProj.defectSurveys?.length || 0);
+
+          if (itemCountChanged || sqlW.length > 0 || sqlOp.length > 0) {
+            projectService.updateProjectData(
+              targetProj.id,
+              {
+                vessel: sqlV,
+                schedule: sqlS,
+                categories: sqlC,
+                workItems: sqlW,
+                opnameItems: sqlOp,
+                defectSurveys: sqlD,
+                signatures: sqlSig,
+              },
+              { skipCloudSync: true, preserveLastModified: !itemCountChanged }
+            );
+          }
+        }
+        loadDataFromSqlite({ skipCloudPush: true });
+      } else {
+        loadDataFromSqlite({ skipCloudPush: true });
+      }
+      setLastSavedTime(new Date());
+
+      // Fetch all Firestore projects across hub & workspace
+      setIsCloudSyncing(true);
+      try {
+        const cloudDocs = await firebaseSyncService.loadAllProjects();
+        if (isCancelled) return;
+
+        if (cloudDocs) {
+          const { toUpload, activeProjectUpdated, hydratedCount } =
+            projectService.reconcileCloudProjects(cloudDocs);
+
+          if (toUpload.length > 0) {
+            await Promise.all(toUpload.map((p) => projectService.pushProjectToCloud(p)));
+          }
+
+          if (isCancelled) return;
+          setAllProjects(projectService.getAllProjects());
+          const activeProj = projectService.getActiveProject();
+          if (activeProj) {
+            const matchingDoc = cloudDocs.find((d) => d?.id === activeProj.id);
+            const currentSqlId = sqliteService.getProjectSchedule()?.id;
+            if (!sqliteService.hadLocalDbOnBoot || activeProjectUpdated || (hydratedCount > 0 && currentSqlId === activeProj.id)) {
+              hydrateWorkspaceFromProject(activeProj, matchingDoc?.extras);
+            } else {
+              setCurrentProject(activeProj);
+            }
+          }
+          setLastCloudSyncAt(new Date());
+        }
+      } finally {
+        if (!isCancelled) {
+          setIsCloudSyncing(false);
+        }
+      }
+    };
+
+    void initAndSyncCloud();
+
+    // 2. Subscribe to real-time SQLite mutations while in workspace
+    const unsubscribeSqlite = sqliteService.subscribe(() => {
+      loadDataFromSqlite();
+    });
+
+    // 3. Subscribe to real-time Firestore collection updates across all projects
+    const unsubscribeCollection = firebaseSyncService.subscribeAllProjects((liveDocs) => {
+      if (isCancelled) return;
+      const { hydratedCount, removedCount, activeProjectUpdated } =
+        projectService.reconcileCloudProjects(liveDocs);
+
+      if (hydratedCount > 0 || removedCount > 0) {
+        setAllProjects(projectService.getAllProjects());
+        const activeProj = projectService.getActiveProject();
+        if (activeProj) {
+          setCurrentProject(activeProj);
+          if (activeProjectUpdated && currentViewRef.current === 'workspace') {
+            const matchingDoc = liveDocs.find((d) => d?.id === activeProj.id);
+            hydrateWorkspaceFromProject(activeProj, matchingDoc?.extras);
+          }
+        }
+        setLastCloudSyncAt(new Date());
+      }
+    });
+
+    return () => {
+      isCancelled = true;
+      unsubConn();
+      unsubProjects();
+      unsubscribeSqlite();
+      unsubscribeCollection();
+      window.removeEventListener('shipyard-cloud-dirty', handleDirtyExtras);
+      window.removeEventListener('shipyard-cloud-hydrated', handleCloudHydrated);
+      if (cloudSyncTimerRef.current) {
+        clearTimeout(cloudSyncTimerRef.current);
+      }
+    };
+  }, [hydrateWorkspaceFromProject, loadDataFromSqlite, scheduleCloudSync]);
+
+  // Real-time single-project Firestore listener when inside workspace
   useEffect(() => {
     if (currentView !== 'workspace' || !currentProject?.id) return;
 
     const projId = currentProject.id;
 
     const applyCloudSnapshot = (cloudData: any) => {
-      if (!cloudData || !cloudData.workItems) return;
+      if (!cloudData || cloudData.isDeleted) return;
+      if (cloudData.lastClientId && cloudData.lastClientId === CLIENT_INSTANCE_ID) {
+        return;
+      }
       if (cloudData.updatedAt && cloudData.updatedAt === lastCloudUpdatedAtRef.current) {
         return;
       }
@@ -266,73 +542,77 @@ export default function App() {
         lastCloudUpdatedAtRef.current = cloudData.updatedAt;
       }
 
+      const { activeProjectUpdated, hydratedCount } = projectService.reconcileCloudProjects([cloudData]);
+      const latestProj = projectService.getProjectById(projId);
+      if (latestProj && (activeProjectUpdated || hydratedCount > 0)) {
+        hydrateWorkspaceFromProject(latestProj, cloudData.extras);
+        setLastCloudSyncAt(new Date());
+      }
+    };
+
+    const unsubscribe = firebaseSyncService.subscribeProjectData(projId, applyCloudSnapshot);
+    return () => {
+      unsubscribe();
+    };
+  }, [currentView, currentProject?.id, hydrateWorkspaceFromProject]);
+
+  // Handle switching or opening a project (accepts object or string ID)
+  const handleSelectProject = useCallback(
+    (projectOrId: ShipyardProject | string) => {
+      const targetId = typeof projectOrId === 'string' ? projectOrId : projectOrId.id;
+      let project =
+        projectService.getProjectById(targetId) || (typeof projectOrId === 'object' ? projectOrId : null);
+      if (!project) {
+        project = projectService.getActiveProject();
+      }
+      if (!project) return;
+
+      // Check if user is logged in
+      const activeUser = currentUser || authService.getCurrentUser();
+      if (!activeUser) {
+        setPendingProjectId(project.id);
+        setPendingProjectName(project.vessel?.name || 'Kapal');
+        setCurrentView('login');
+        showToast(`Silakan login terlebih dahulu untuk mengakses workspace proyek ${project.vessel?.name || ''}`);
+        return;
+      }
+
+      const currentLoadedSchedule = sqliteService.getProjectSchedule();
+      const currentLoadedVessel = sqliteService.getVessel();
+      const isAlreadyLoaded = Boolean(
+        currentLoadedSchedule?.id === project.id &&
+          currentLoadedVessel?.id === project.vessel?.id &&
+          sqliteService.getWorkItems().length === (project.workItems?.length || 0)
+      );
+
+      projectService.setActiveProjectId(project.id);
+      setCurrentProject(project);
+
       isApplyingCloudUpdateRef.current = true;
       try {
-        if (Array.isArray(cloudData.workItems) && cloudData.workItems.length > 0) {
-          sqliteService.importWorkItems(cloudData.workItems, 'replace');
-        }
-        if (cloudData.vessel) sqliteService.updateVessel(cloudData.vessel);
-        if (cloudData.schedule) sqliteService.updateProjectSchedule(cloudData.schedule);
-        if (Array.isArray(cloudData.opnameItems) && cloudData.opnameItems.length > 0) {
-          sqliteService.importOpnameWorkItems(cloudData.opnameItems, 'replace');
+        if (!isAlreadyLoaded) {
+          sqliteService.loadProjectData(project);
         }
         loadDataFromSqlite({ skipCloudPush: true });
       } finally {
         isApplyingCloudUpdateRef.current = false;
       }
-    };
 
-    // 1. Load initial cloud data if available
-    firebaseSyncService.loadProjectData(projId).then((cloudData) => {
-      if (cloudData && cloudData.workItems && cloudData.workItems.length > 0) {
-        applyCloudSnapshot(cloudData);
-      }
-    });
+      setCurrentView('workspace');
+      showToast(`Beralih ke proyek kapal: ${project.vessel?.name || 'Kapal'}`);
 
-    // 2. Subscribe to real-time changes from other users
-    const unsubscribe = firebaseSyncService.subscribeProjectData(projId, applyCloudSnapshot);
-
-    return () => {
-      unsubscribe();
-      if (cloudSyncTimerRef.current) {
-        clearTimeout(cloudSyncTimerRef.current);
-      }
-    };
-  }, [currentView, currentProject?.id, loadDataFromSqlite]);
-
-  // Handle switching or opening a project (accepts object or string ID)
-  const handleSelectProject = useCallback((projectOrId: ShipyardProject | string) => {
-    const targetId = typeof projectOrId === 'string' ? projectOrId : projectOrId.id;
-    let project = projectService.getProjectById(targetId) || (typeof projectOrId === 'object' ? projectOrId : null);
-    if (!project) {
-      project = projectService.getActiveProject();
-    }
-    if (!project) return;
-
-    // Check if user is logged in
-    const activeUser = currentUser || authService.getCurrentUser();
-    if (!activeUser) {
-      setPendingProjectId(project.id);
-      setPendingProjectName(project.vessel?.name || 'Kapal');
-      setCurrentView('login');
-      showToast(`Silakan login terlebih dahulu untuk mengakses workspace proyek ${project.vessel?.name || ''}`);
-      return;
-    }
-
-    const currentLoadedVessel = sqliteService.getVessel();
-    const isAlreadyLoaded = currentLoadedVessel && (currentLoadedVessel.id === project.vessel?.id || currentLoadedVessel.name === project.vessel?.name);
-
-    projectService.setActiveProjectId(project.id);
-    setCurrentProject(project);
-
-    if (!isAlreadyLoaded || sqliteService.getWorkItems().length === 0) {
-      sqliteService.loadProjectData(project);
-    }
-
-    loadDataFromSqlite();
-    setCurrentView('workspace');
-    showToast(`Beralih ke proyek kapal: ${project.vessel?.name || 'Kapal'}`);
-  }, [currentUser, loadDataFromSqlite]);
+      // Fetch freshest single-project snapshot from cloud (never pushing local template back)
+      firebaseSyncService.loadProjectData(project.id).then((cloudData) => {
+        if (!cloudData || cloudData.isDeleted) return;
+        const { hydratedCount, activeProjectUpdated } = projectService.reconcileCloudProjects([cloudData]);
+        const updatedProj = projectService.getProjectById(project.id);
+        if (updatedProj && (hydratedCount > 0 || activeProjectUpdated)) {
+          hydrateWorkspaceFromProject(updatedProj, cloudData.extras);
+        }
+      });
+    },
+    [currentUser, hydrateWorkspaceFromProject, loadDataFromSqlite, showToast]
+  );
 
   const handleOpenLogin = () => {
     setPendingProjectId(null);
@@ -340,9 +620,12 @@ export default function App() {
     setCurrentView('login');
   };
 
-  const handleSwitchProjectById = useCallback((projectId: string) => {
-    handleSelectProject(projectId);
-  }, [handleSelectProject]);
+  const handleSwitchProjectById = useCallback(
+    (projectId: string) => {
+      handleSelectProject(projectId);
+    },
+    [handleSelectProject]
+  );
 
   const handleBackToProjectsHub = () => {
     setAllProjects(projectService.getAllProjects());
@@ -360,12 +643,7 @@ export default function App() {
       if (proj) {
         projectService.setActiveProjectId(proj.id);
         setCurrentProject(proj);
-        const currentLoadedVessel = sqliteService.getVessel();
-        const isAlreadyLoaded = currentLoadedVessel && (currentLoadedVessel.id === proj.vessel?.id || currentLoadedVessel.name === proj.vessel?.name);
-        if (!isAlreadyLoaded || sqliteService.getWorkItems().length === 0) {
-          sqliteService.loadProjectData(proj);
-        }
-        loadDataFromSqlite();
+        hydrateWorkspaceFromProject(proj);
         setCurrentView('workspace');
         showToast(`Selamat datang, ${user.name}! Mengakses workspace ${proj.vessel.name}`);
         return;
@@ -386,22 +664,6 @@ export default function App() {
     setCurrentView('projects-hub');
     showToast('Anda telah keluar dari sistem.');
   };
-
-  useEffect(() => {
-    sqliteService.init().then(() => {
-      loadDataFromSqlite({ skipCloudPush: true });
-      setLastSavedTime(new Date());
-    });
-
-    // Reactive subscription with smooth, flicker-free status transitions
-    const unsubscribe = sqliteService.subscribe(() => {
-      loadDataFromSqlite();
-    });
-
-    return () => {
-      unsubscribe();
-    };
-  }, [loadDataFromSqlite]);
 
   // Handle Global Keyboard Shortcut: ESC key to close active pop-ups/modals or reset active dialogs
   useEffect(() => {
@@ -677,16 +939,33 @@ export default function App() {
   }, [loadDataFromSqlite, showCustomConfirm]);
 
   // Manual & Auto Save Handlers
-  const handleManualSave = useCallback(() => {
+  const handleManualSave = useCallback(async () => {
     setSaveStatus('saving');
     sqliteService.flushPersist();
-    loadDataFromSqlite();
-    setTimeout(() => {
-      setSaveStatus('saved');
-      setLastSavedTime(new Date());
-      showToast('Database & seluruh data proyek kapal berhasil disimpan!');
-    }, 300);
-  }, [loadDataFromSqlite]);
+    loadDataFromSqlite({ skipCloudPush: true });
+    if (cloudSyncTimerRef.current) {
+      clearTimeout(cloudSyncTimerRef.current);
+      cloudSyncTimerRef.current = null;
+    }
+    const activeProj = projectService.getActiveProject();
+    let cloudSaved = false;
+    if (activeProj) {
+      setSaveStatus('syncing');
+      const savedAt = await projectService.pushProjectToCloud(activeProj);
+      if (savedAt) {
+        lastCloudUpdatedAtRef.current = savedAt;
+        setLastCloudSyncAt(new Date());
+        cloudSaved = true;
+      }
+    }
+    setSaveStatus('saved');
+    setLastSavedTime(new Date());
+    showToast(
+      cloudSaved
+        ? 'Seluruh data proyek tersimpan ke SQLite & tersinkron ke Cloud!'
+        : 'Database tersimpan lokal (Cloud Sync menunggu koneksi internet).'
+    );
+  }, [loadDataFromSqlite, showToast]);
 
   // Save Vessel & Project Specs
   const handleSaveVesselAndSchedule = useCallback((newVessel: VesselSpec, newSchedule: ProjectSchedule) => {
@@ -847,7 +1126,7 @@ export default function App() {
   const activeProjectId = currentProject?.id || vessel?.id || 'proj-f049';
   const projectMaterials = useMemo(() => {
     return materialEstimationService.getMaterialEstimates(activeProjectId);
-  }, [activeProjectId, workItems]);
+  }, [activeProjectId, workItems, extrasSyncTick]);
 
   const materialEstimateCost = useMemo(
     () => projectMaterials.reduce((sum, m) => sum + (m.totalCost || 0), 0),
@@ -898,6 +1177,10 @@ export default function App() {
           onOpenLogin={handleOpenLogin}
           onNotify={showToast}
           onConfirm={showCustomConfirm}
+          cloudConnectionState={cloudConnectionState}
+          isCloudSyncing={isCloudSyncing}
+          lastCloudSyncAt={lastCloudSyncAt}
+          onSyncCloud={() => handleForceCloudSync(false)}
         />
         {toastMessage && (
           <div className="fixed bottom-6 right-6 z-50 bg-slate-900 text-white text-xs px-4 py-2.5 rounded-xl shadow-lg border border-slate-700 flex items-center gap-2 animate-in fade-in slide-in-from-bottom-2">

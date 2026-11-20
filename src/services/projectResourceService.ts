@@ -1,4 +1,5 @@
 import { ProjectResourceItem, ResourceCategory, ResourceSummary, WorkItem, VesselSpec } from '../types';
+import { notifyCloudDirty } from './projectExtrasSync';
 
 const RESOURCE_STORAGE_PREFIX = 'shipyard_project_resources_v1_';
 
@@ -196,14 +197,17 @@ export const projectResourceService = {
     }
     // If not found in localStorage, return default shipyard preset for this project
     const defaultItems = this.getStandardDockingPreset(projectId);
-    this.saveResources(projectId, defaultItems);
+    this.saveResources(projectId, defaultItems, { silent: true });
     return defaultItems;
   },
 
-  saveResources(projectId: string, items: ProjectResourceItem[]): void {
+  saveResources(projectId: string, items: ProjectResourceItem[], options?: { silent?: boolean }): void {
     if (!projectId) return;
     try {
       localStorage.setItem(`${RESOURCE_STORAGE_PREFIX}${projectId}`, JSON.stringify(items));
+      if (!options?.silent) {
+        notifyCloudDirty(projectId);
+      }
     } catch (e) {
       console.warn('Failed to save project resources to storage:', e);
     }

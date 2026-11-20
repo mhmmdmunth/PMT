@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { ClipboardCheck, Ship, Calendar, FileDown, CheckCircle2 } from 'lucide-react';
 import { WorkItem, WorkCategory, VesselSpec, ProjectSchedule } from '../types';
 import { generateSatisfactionNotePdf } from '../utils/pdfExport';
+import { notifyCloudDirty } from '../services/projectExtrasSync';
 
 interface SatisfactionNoteModuleProps {
   opnameItems: WorkItem[];
@@ -31,11 +32,26 @@ export const SatisfactionNoteModule: React.FC<SatisfactionNoteModuleProps> = ({
     }
   });
 
+  useEffect(() => {
+    const reload = () => {
+      try {
+        const saved = localStorage.getItem(storageKey);
+        setNotesMap(saved ? JSON.parse(saved) : {});
+      } catch {
+        setNotesMap({});
+      }
+    };
+    reload();
+    window.addEventListener('shipyard-cloud-hydrated', reload);
+    return () => window.removeEventListener('shipyard-cloud-hydrated', reload);
+  }, [storageKey]);
+
   const handleNoteChange = (itemId: string, text: string) => {
     setNotesMap((prev) => {
       const next = { ...prev, [itemId]: text };
       try {
         localStorage.setItem(storageKey, JSON.stringify(next));
+        notifyCloudDirty(schedule?.id);
       } catch (e) {
         console.warn('Failed saving satisfaction notes to localStorage', e);
       }

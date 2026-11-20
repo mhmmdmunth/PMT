@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   Ship,
   Plus,
@@ -28,10 +28,13 @@ import {
   X,
   Camera,
   Download,
-  Upload
+  Upload,
+  Cloud,
+  RefreshCw
 } from 'lucide-react';
 import { ShipyardProject, UserProfile, VesselSpec, ProjectSchedule } from '../types';
 import { projectService } from '../services/projectService';
+import { CloudConnectionState } from '../services/firebaseSyncService';
 
 interface ProjectSelectionHubProps {
   currentUser: UserProfile | null;
@@ -40,6 +43,10 @@ interface ProjectSelectionHubProps {
   onOpenLogin: () => void;
   onNotify: (msg: string) => void;
   onConfirm: (title: string, message: string, onConfirm: () => void) => void;
+  cloudConnectionState?: CloudConnectionState;
+  isCloudSyncing?: boolean;
+  lastCloudSyncAt?: Date | null;
+  onSyncCloud?: () => void;
 }
 
 export const ProjectSelectionHub: React.FC<ProjectSelectionHubProps> = ({
@@ -49,8 +56,22 @@ export const ProjectSelectionHub: React.FC<ProjectSelectionHubProps> = ({
   onOpenLogin,
   onNotify,
   onConfirm,
+  cloudConnectionState = 'checking',
+  isCloudSyncing = false,
+  lastCloudSyncAt = null,
+  onSyncCloud,
 }) => {
   const [projects, setProjects] = useState<ShipyardProject[]>(() => projectService.getAllProjects());
+
+  useEffect(() => {
+    setProjects([...projectService.getAllProjects()]);
+    const unsubscribe = projectService.subscribe(() => {
+      setProjects([...projectService.getAllProjects()]);
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, []);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'Under Docking' | 'In Progress' | 'Preparation' | 'Completed'>('all');
   const [vesselTypeFilter, setVesselTypeFilter] = useState<'all' | 'tug' | 'barge' | 'tanker'>('all');
@@ -379,16 +400,57 @@ export const ProjectSelectionHub: React.FC<ProjectSelectionHubProps> = ({
 
             {/* Action Buttons */}
             <div className="flex flex-wrap items-center gap-2.5">
+              {onSyncCloud && (
+                <button
+                  type="button"
+                  onClick={onSyncCloud}
+                  disabled={isCloudSyncing}
+                  title={
+                    lastCloudSyncAt
+                      ? `Terakhir sinkron Cloud: ${lastCloudSyncAt.toLocaleTimeString('id-ID')}`
+                      : 'Sinkronkan seluruh data proyek dengan Cloud Firestore'
+                  }
+                  className="inline-flex items-center gap-2 px-3.5 py-2 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 font-semibold text-xs sm:text-sm rounded-xl transition-colors cursor-pointer disabled:opacity-60 whitespace-nowrap shrink-0"
+                >
+                  {isCloudSyncing ? (
+                    <RefreshCw className="w-4 h-4 text-emerald-600 animate-spin" />
+                  ) : (
+                    <Cloud
+                      className={`w-4 h-4 ${
+                        cloudConnectionState === 'connected'
+                          ? 'text-emerald-600'
+                          : cloudConnectionState === 'offline' || cloudConnectionState === 'error'
+                          ? 'text-amber-600'
+                          : 'text-slate-400'
+                      }`}
+                    />
+                  )}
+                  <span>
+                    {isCloudSyncing
+                      ? 'Menyinkronkan...'
+                      : cloudConnectionState === 'offline'
+                      ? 'Offline (Coba Sync)'
+                      : 'Sinkronkan Cloud'}
+                  </span>
+                </button>
+              )}
               <button
                 id="btn-create-new-project"
                 onClick={() => handleOpenNewModal('tug')}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold text-xs sm:text-sm rounded-xl shadow-xs transition-colors cursor-pointer"
+                className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold text-xs sm:text-sm rounded-xl shadow-xs transition-colors cursor-pointer whitespace-nowrap shrink-0"
               >
                 <Plus className="w-4 h-4" />
                 <span>+ Buat Proyek Kapal Baru</span>
               </button>
             </div>
           </div>
+
+          {!projectService.hadLocalProjectsOnBoot && isCloudSyncing && (
+            <div className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-medium">
+              <RefreshCw className="w-4 h-4 text-emerald-600 animate-spin shrink-0" />
+              <span>Memuat seluruh proyek &amp; database kapal dari Cloud Firestore agar sama dengan perangkat utama...</span>
+            </div>
+          )}
 
           {/* KPI Stat Cards */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">

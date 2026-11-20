@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   FileText,
   Ship,
@@ -16,6 +16,7 @@ import { WorkItem, WorkCategory, VesselSpec, ProjectSchedule } from '../types';
 import { TonnageCalculator } from '../utils/tonnageCalculator';
 import { generateWorkDoneReportPdf } from '../utils/pdfExport';
 import { exportWorkDoneReportExcel } from '../utils/excelExport';
+import { notifyCloudDirty } from '../services/projectExtrasSync';
 
 interface WorkDoneReportModuleProps {
   opnameItems: WorkItem[];
@@ -52,11 +53,26 @@ export const WorkDoneReportModule: React.FC<WorkDoneReportModuleProps> = ({
     }
   });
 
+  useEffect(() => {
+    const reload = () => {
+      try {
+        const saved = localStorage.getItem(storageKey);
+        setNotesMap(saved ? JSON.parse(saved) : {});
+      } catch {
+        setNotesMap({});
+      }
+    };
+    reload();
+    window.addEventListener('shipyard-cloud-hydrated', reload);
+    return () => window.removeEventListener('shipyard-cloud-hydrated', reload);
+  }, [storageKey]);
+
   const handleNoteChange = (itemId: string, text: string) => {
     setNotesMap((prev) => {
       const next = { ...prev, [itemId]: text };
       try {
         localStorage.setItem(storageKey, JSON.stringify(next));
+        notifyCloudDirty(schedule?.id);
       } catch (e) {
         console.warn('Failed saving satisfaction notes', e);
       }

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   FileCheck2,
   Search,
@@ -22,6 +22,7 @@ import {
   SatisfactionRabStatus,
 } from '../utils/rabHelpers';
 import { exportRabSatisfactionExcel, exportRabSatisfactionPdf } from '../utils/rabExport';
+import { notifyCloudDirty } from '../services/projectExtrasSync';
 
 interface RabSatisfactionViewProps {
   categories: WorkCategory[];
@@ -80,6 +81,26 @@ export const RabSatisfactionView: React.FC<RabSatisfactionViewProps> = ({
   const [scopeFilter, setScopeFilter] = useState<'all' | 'accepted' | 'noted' | 'conditional'>('all');
   const [isExporting, setIsExporting] = useState(false);
 
+  useEffect(() => {
+    const reload = () => {
+      try {
+        const savedNotes = localStorage.getItem(notesStorageKey);
+        setNotesMap(savedNotes ? JSON.parse(savedNotes) : {});
+      } catch {
+        setNotesMap({});
+      }
+      try {
+        const savedStatus = localStorage.getItem(statusStorageKey);
+        setStatusMap(savedStatus ? JSON.parse(savedStatus) : {});
+      } catch {
+        setStatusMap({});
+      }
+    };
+    reload();
+    window.addEventListener('shipyard-cloud-hydrated', reload);
+    return () => window.removeEventListener('shipyard-cloud-hydrated', reload);
+  }, [notesStorageKey, statusStorageKey]);
+
   const sortedCategories = useMemo(
     () => [...categories].sort((a, b) => a.sortOrder - b.sortOrder),
     [categories]
@@ -90,6 +111,7 @@ export const RabSatisfactionView: React.FC<RabSatisfactionViewProps> = ({
       const next = { ...prev, [itemId]: text };
       try {
         localStorage.setItem(notesStorageKey, JSON.stringify(next));
+        notifyCloudDirty(schedule?.id);
       } catch (e) {
         console.warn(e);
       }
@@ -102,6 +124,7 @@ export const RabSatisfactionView: React.FC<RabSatisfactionViewProps> = ({
       const next = { ...prev, [itemId]: status };
       try {
         localStorage.setItem(statusStorageKey, JSON.stringify(next));
+        notifyCloudDirty(schedule?.id);
       } catch (e) {
         console.warn(e);
       }

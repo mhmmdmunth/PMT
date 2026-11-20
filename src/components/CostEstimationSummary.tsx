@@ -33,6 +33,7 @@ import { TonnageCalculator, MaterialTypeDefinition } from '../utils/tonnageCalcu
 import { TabExportImportButton } from './TabExportImportButton';
 import { MaterialCalculatorModal, CalculatedMaterialResult } from './MaterialCalculatorModal';
 import { getNextItemSequenceNumber } from '../utils/numberingUtils';
+import { notifyCloudDirty } from '../services/projectExtrasSync';
 
 interface DepartmentGroup {
   id: string;
@@ -117,33 +118,58 @@ export const CostEstimationSummary: React.FC<CostEstimationSummaryProps> = React
 
   const overheadPercent = controlledOverhead !== undefined ? controlledOverhead : internalOverheadPercent;
   const setOverheadPercent = (val: number) => {
-    if (onOverheadPercentChange) onOverheadPercentChange(val);
-    else setInternalOverheadPercent(val);
+    if (onOverheadPercentChange) {
+      onOverheadPercentChange(val);
+    } else {
+      setInternalOverheadPercent(val);
+      try {
+        localStorage.setItem(`shipyard_overhead_percent_${vessel.id || 'default'}`, String(val));
+        notifyCloudDirty(vessel.id);
+      } catch (e) {
+        console.warn(e);
+      }
+    }
   };
 
   const ppnPercent = controlledPpn !== undefined ? controlledPpn : internalPpnPercent;
   const setPpnPercent = (val: number) => {
-    if (onPpnPercentChange) onPpnPercentChange(val);
-    else setInternalPpnPercent(val);
+    if (onPpnPercentChange) {
+      onPpnPercentChange(val);
+    } else {
+      setInternalPpnPercent(val);
+      try {
+        localStorage.setItem(`shipyard_ppn_percent_${vessel.id || 'default'}`, String(val));
+        notifyCloudDirty(vessel.id);
+      } catch (e) {
+        console.warn(e);
+      }
+    }
   };
 
   useEffect(() => {
-    if (controlledOverhead !== undefined) return;
-    try {
-      localStorage.setItem(`shipyard_overhead_percent_${vessel.id || 'default'}`, String(internalOverheadPercent));
-    } catch (e) {
-      console.warn(e);
-    }
-  }, [internalOverheadPercent, vessel.id, controlledOverhead]);
-
-  useEffect(() => {
-    if (controlledPpn !== undefined) return;
-    try {
-      localStorage.setItem(`shipyard_ppn_percent_${vessel.id || 'default'}`, String(internalPpnPercent));
-    } catch (e) {
-      console.warn(e);
-    }
-  }, [internalPpnPercent, vessel.id, controlledPpn]);
+    if (controlledOverhead !== undefined && controlledPpn !== undefined) return;
+    const reload = () => {
+      if (controlledOverhead === undefined) {
+        try {
+          const saved = localStorage.getItem(`shipyard_overhead_percent_${vessel.id || 'default'}`);
+          if (saved !== null) setInternalOverheadPercent(parseFloat(saved) || 0);
+        } catch (e) {
+          console.warn(e);
+        }
+      }
+      if (controlledPpn === undefined) {
+        try {
+          const saved = localStorage.getItem(`shipyard_ppn_percent_${vessel.id || 'default'}`);
+          if (saved !== null) setInternalPpnPercent(parseFloat(saved) || 0);
+        } catch (e) {
+          console.warn(e);
+        }
+      }
+    };
+    reload();
+    window.addEventListener('shipyard-cloud-hydrated', reload);
+    return () => window.removeEventListener('shipyard-cloud-hydrated', reload);
+  }, [vessel.id, controlledOverhead, controlledPpn]);
 
   // Department & Category & Area Filter states matching RepairListTable
   const [selectedDepartment, setSelectedDepartment] = useState<string>('all');

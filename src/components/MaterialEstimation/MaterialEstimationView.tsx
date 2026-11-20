@@ -72,16 +72,28 @@ export const MaterialEstimationView: React.FC<MaterialEstimationViewProps> = ({
     materialEstimationService.getMaterialEstimates(projectId)
   );
 
-  // Automatically sync material estimates whenever active project or repair list changes
+  // Sync material estimates from storage/cloud hydration, only auto-generating if project has no saved estimates yet
   useEffect(() => {
     if (!projectId) return;
-    const generated = materialEstimationService.generateFromRepairList(
-      projectId,
-      workItems,
-      categories,
-      'replace'
-    );
-    setMaterials(generated);
+    const syncOrLoad = () => {
+      const existing = materialEstimationService.getMaterialEstimates(projectId);
+      if (existing.length > 0) {
+        setMaterials(existing);
+      } else if (workItems.length > 0) {
+        const generated = materialEstimationService.generateFromRepairList(
+          projectId,
+          workItems,
+          categories,
+          'replace'
+        );
+        setMaterials(generated);
+      } else {
+        setMaterials([]);
+      }
+    };
+    syncOrLoad();
+    window.addEventListener('shipyard-cloud-hydrated', syncOrLoad);
+    return () => window.removeEventListener('shipyard-cloud-hydrated', syncOrLoad);
   }, [projectId, workItems, categories]);
 
   // Modals state

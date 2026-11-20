@@ -137,8 +137,13 @@ class SqliteService {
   private initPromise: Promise<void> | null = null;
   private listeners: Set<() => void> = new Set();
   private isUsingFallback = false;
+  private suppressNotify = false;
+  public readonly hadLocalDbOnBoot: boolean;
 
   constructor() {
+    this.hadLocalDbOnBoot =
+      typeof localStorage !== 'undefined' &&
+      Boolean(localStorage.getItem(DB_STORAGE_KEY) || localStorage.getItem(DB_FALLBACK_JSON_KEY));
     if (typeof window !== 'undefined') {
       window.addEventListener('beforeunload', () => {
         this.flushPersist();
@@ -257,13 +262,6 @@ class SqliteService {
           store.categories.push({ ...defCat });
         }
       });
-
-      // Ensure all categories in repair list are emptied as requested
-      const clearedKey = 'shipyard_work_items_cleared_v1';
-      if (!localStorage.getItem(clearedKey + '_fallback')) {
-        store.workItems = [];
-        localStorage.setItem(clearedKey + '_fallback', 'true');
-      }
     } catch (e) {
       console.warn('Fallback store parse error', e);
     }
@@ -869,6 +867,7 @@ class SqliteService {
   }
 
   private notifyListeners() {
+    if (this.suppressNotify) return;
     this.listeners.forEach((cb) => cb());
   }
 
@@ -1350,17 +1349,6 @@ class SqliteService {
       }
     } catch (err) {
       console.warn('work_categories migration error:', err);
-    }
-
-    // Migration: Kosongkan seluruh isi kategori di repair list
-    try {
-      const clearedKey = 'shipyard_work_items_cleared_v1_sqlite';
-      if (!localStorage.getItem(clearedKey)) {
-        this.db.run('DELETE FROM work_items');
-        localStorage.setItem(clearedKey, 'true');
-      }
-    } catch (err) {
-      console.warn('work_items clear migration error:', err);
     }
   }
 
@@ -3270,29 +3258,94 @@ class SqliteService {
     }
   }
 
-  public loadProjectData(proj: import('../types').ShipyardProject | any): void {
-    if (!this.db) return;
+  public importCategories(categories: WorkCategory[]): void {
+    if (!this.db || !Array.isArray(categories) || categories.length === 0) return;
     try {
-      const existingItems = this.getWorkItems();
-      const existingLogsMap = new Map<string, { dailyLogs?: any; planLogs?: any; progressPercent?: number; isCompleted?: boolean }>();
-      existingItems.forEach((it) => {
-        if (it && it.id) {
-          existingLogsMap.set(it.id, {
-            dailyLogs: it.dailyLogs,
-            planLogs: it.planLogs,
-            progressPercent: it.progressPercent,
-            isCompleted: it.isCompleted,
-          });
-        }
-        if (it && it.description) {
-          existingLogsMap.set(it.description.trim().toLowerCase(), {
-            dailyLogs: it.dailyLogs,
-            planLogs: it.planLogs,
-            progressPercent: it.progressPercent,
-            isCompleted: it.isCompleted,
-          });
+      this.db.run('DELETE FROM work_categories');
+      const stmtCat = this.db.prepare('INSERT OR REPLACE INTO work_categories VALUES (?, ?, ?, ?)');
+      categories.forEach((cat) => {
+        if (cat) {
+          stmtCat.run([cat.id, cat.code, cat.name, cat.sortOrder]);
         }
       });
+      stmtCat.free();
+      this.persist();
+      this.notifyListeners();
+    } catch (e) {
+      console.error('importCategories error:', e);
+    }
+  }
+
+  public importDefectSurveys(surveys: DefectSurvey[]): void {
+    if (!this.db || !Array.isArray(surveys)) return;
+    try {
+      this.db.run('DELETE FROM defect_surveys');
+      const fallbackVesselId = this.getVessel()?.id || 'proj-f049';
+      surveys.forEach((surv) => {
+        if (surv) {
+          const id = surv.id || `surv-${Date.now()}`;
+          const createdAt = surv.createdAt || new Date().toISOString().replace('T', ' ').substring(0, 16);
+          this.db.run(
+            `INSERT OR REPLACE INTO defect_surveys VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              id,
+              surv.projectId || fallbackVesselId,
+              surv.locationZone || '',
+              surv.defectDescription || '',
+              surv.length || 0,
+              surv.width || 0,
+              surv.thickness || 0,
+              surv.plateType || 'Mild Steel BKI Grade A',
+              surv.calculatedWeightKg || 0,
+              surv.syncStatus ?? 0,
+              createdAt,
+              surv.transferredToWorkItemId || '',
+              surv.remedyAction || '',
+            ]
+          );
+        }
+      });
+      this.persist();
+      this.notifyListeners();
+    } catch (e) {
+      console.error('importDefectSurveys error:', e);
+    }
+  }
+
+  public loadProjectData(proj: import('../types').ShipyardProject | any): void {
+    if (!this.db) return;
+    const prevSuppress = this.suppressNotify;
+    this.suppressNotify = true;
+    try {
+      const currentSchedule = this.getProjectSchedule();
+      const currentVessel = this.getVessel();
+      const isSameProject = Boolean(
+        (proj?.id && currentSchedule?.id === proj.id) ||
+        (proj?.vessel?.id && currentVessel?.id === proj.vessel.id)
+      );
+
+      const existingLogsMap = new Map<string, { dailyLogs?: any; planLogs?: any; progressPercent?: number; isCompleted?: boolean }>();
+      if (isSameProject) {
+        const existingItems = this.getWorkItems();
+        existingItems.forEach((it) => {
+          if (it && it.id) {
+            existingLogsMap.set(it.id, {
+              dailyLogs: it.dailyLogs,
+              planLogs: it.planLogs,
+              progressPercent: it.progressPercent,
+              isCompleted: it.isCompleted,
+            });
+          }
+          if (it && it.description) {
+            existingLogsMap.set(it.description.trim().toLowerCase(), {
+              dailyLogs: it.dailyLogs,
+              planLogs: it.planLogs,
+              progressPercent: it.progressPercent,
+              isCompleted: it.isCompleted,
+            });
+          }
+        });
+      }
 
       this.db.run('DELETE FROM work_items');
       this.db.run('DELETE FROM opname_work_items');
@@ -3306,20 +3359,24 @@ class SqliteService {
       const safeSchedule = proj?.schedule || DEFAULT_SCHEDULE;
       const safeCategories = proj?.categories && Array.isArray(proj.categories) ? proj.categories : DEFAULT_CATEGORIES;
       const safeWorkItems = proj?.workItems && Array.isArray(proj.workItems) ? proj.workItems : [];
-      const safeOpnameItems = proj?.opnameItems && Array.isArray(proj.opnameItems) ? proj.opnameItems : [];
+      const hasExplicitOpname = Array.isArray(proj?.opnameItems);
+      const safeOpnameItems = hasExplicitOpname ? proj.opnameItems : [];
       const safeDefects = proj?.defectSurveys && Array.isArray(proj.defectSurveys) ? proj.defectSurveys : [];
       const safeSignatures = proj?.signatures || DEFAULT_SIGNATURES;
 
       const mergedWorkItems = safeWorkItems.map((it: any) => {
-        if (!it) return it;
+        if (!it || !isSameProject) return it;
         const found = existingLogsMap.get(it.id) || existingLogsMap.get((it.description || '').trim().toLowerCase());
         if (found) {
           return {
             ...it,
-            dailyLogs: found.dailyLogs || it.dailyLogs,
-            planLogs: found.planLogs || it.planLogs,
-            progressPercent: found.progressPercent !== undefined && found.progressPercent > 0 ? found.progressPercent : it.progressPercent,
-            isCompleted: found.isCompleted !== undefined ? found.isCompleted : it.isCompleted,
+            dailyLogs: it.dailyLogs && Object.keys(it.dailyLogs).length > 0 ? it.dailyLogs : found.dailyLogs,
+            planLogs: it.planLogs && Object.keys(it.planLogs).length > 0 ? it.planLogs : found.planLogs,
+            progressPercent:
+              it.progressPercent !== undefined && it.progressPercent > 0
+                ? it.progressPercent
+                : found.progressPercent,
+            isCompleted: it.isCompleted !== undefined ? it.isCompleted : found.isCompleted,
           };
         }
         return it;
@@ -3344,7 +3401,7 @@ class SqliteService {
       // Opname items
       if (safeOpnameItems.length > 0) {
         this.importOpnameWorkItems(safeOpnameItems, 'replace');
-      } else if (mergedWorkItems.length > 0) {
+      } else if (!hasExplicitOpname && mergedWorkItems.length > 0) {
         this.syncOpnameFromRepairList('replace');
       }
       // Defect surveys
@@ -3375,11 +3432,13 @@ class SqliteService {
       // Signatures
       this.updateSignatures(safeSignatures);
 
-      this.persist();
-      this.notifyListeners();
+      this.executePersist();
     } catch (e) {
       console.error('Error loading project data into SQLite:', e);
+    } finally {
+      this.suppressNotify = prevSuppress;
     }
+    this.notifyListeners();
   }
 
   public resetPlanAndProgress(mode: 'progress_only' | 'all' = 'all'): void {

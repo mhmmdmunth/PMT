@@ -18,6 +18,7 @@ import {
 import { CostEstimationSummary } from './CostEstimationSummary';
 import { RabOpnameView } from './RabOpnameView';
 import { RabSatisfactionView } from './RabSatisfactionView';
+import { notifyCloudDirty } from '../services/projectExtrasSync';
 
 export type RabSubTab = 'repair-list' | 'opname' | 'satisfaction-note';
 
@@ -92,6 +93,8 @@ export const RabModule: React.FC<RabModuleProps> = ({
     }
   }, [activeSubTab]);
 
+  const [hydrationTick, setHydrationTick] = useState(0);
+
   const [overheadPercent, setOverheadPercent] = useState<number>(() => {
     try {
       const saved = localStorage.getItem(`shipyard_overhead_percent_${vessel.id || 'default'}`);
@@ -113,20 +116,45 @@ export const RabModule: React.FC<RabModuleProps> = ({
   });
 
   useEffect(() => {
-    try {
-      localStorage.setItem(`shipyard_overhead_percent_${vessel.id || 'default'}`, String(overheadPercent));
-    } catch {
-      // ignore
-    }
-  }, [overheadPercent, vessel.id]);
+    const reload = () => {
+      try {
+        const savedOh = localStorage.getItem(`shipyard_overhead_percent_${vessel.id || 'default'}`);
+        setOverheadPercent(savedOh !== null ? parseFloat(savedOh) || 0 : 5);
+      } catch {
+        // ignore
+      }
+      try {
+        const savedPpn = localStorage.getItem(`shipyard_ppn_percent_${vessel.id || 'default'}`);
+        setPpnPercent(savedPpn !== null ? parseFloat(savedPpn) || 0 : 11);
+      } catch {
+        // ignore
+      }
+      setHydrationTick((t) => t + 1);
+    };
+    reload();
+    window.addEventListener('shipyard-cloud-hydrated', reload);
+    return () => window.removeEventListener('shipyard-cloud-hydrated', reload);
+  }, [vessel.id]);
 
-  useEffect(() => {
+  const handleOverheadChange = (val: number) => {
+    setOverheadPercent(val);
     try {
-      localStorage.setItem(`shipyard_ppn_percent_${vessel.id || 'default'}`, String(ppnPercent));
+      localStorage.setItem(`shipyard_overhead_percent_${vessel.id || 'default'}`, String(val));
+      notifyCloudDirty(schedule?.id);
     } catch {
       // ignore
     }
-  }, [ppnPercent, vessel.id]);
+  };
+
+  const handlePpnChange = (val: number) => {
+    setPpnPercent(val);
+    try {
+      localStorage.setItem(`shipyard_ppn_percent_${vessel.id || 'default'}`, String(val));
+      notifyCloudDirty(schedule?.id);
+    } catch {
+      // ignore
+    }
+  };
 
   // Compute live comparative totals across all 3 RAB types
   const comparativeSummary = useMemo(() => {
@@ -184,7 +212,7 @@ export const RabModule: React.FC<RabModuleProps> = ({
       satisfactionAcceptedCount,
       satisfactionItemCount: satItems.length,
     };
-  }, [workItems, opnameItems, vessel?.id, vessel?.projectNo, overheadPercent, ppnPercent, activeSubTab]);
+  }, [workItems, opnameItems, vessel?.id, vessel?.projectNo, overheadPercent, ppnPercent, activeSubTab, hydrationTick]);
 
   return (
     <div className="space-y-4">
@@ -219,7 +247,7 @@ export const RabModule: React.FC<RabModuleProps> = ({
                   max={50}
                   step={0.5}
                   value={overheadPercent}
-                  onChange={(e) => setOverheadPercent(Math.max(0, parseFloat(e.target.value) || 0))}
+                  onChange={(e) => handleOverheadChange(Math.max(0, parseFloat(e.target.value) || 0))}
                   className="w-12 text-right font-mono tabular-nums font-bold text-slate-900 bg-transparent focus:outline-hidden"
                 />
                 <span className="text-slate-500 font-mono ml-1">%</span>
@@ -238,7 +266,7 @@ export const RabModule: React.FC<RabModuleProps> = ({
                   max={30}
                   step={0.5}
                   value={ppnPercent}
-                  onChange={(e) => setPpnPercent(Math.max(0, parseFloat(e.target.value) || 0))}
+                  onChange={(e) => handlePpnChange(Math.max(0, parseFloat(e.target.value) || 0))}
                   className="w-12 text-right font-mono tabular-nums font-bold text-slate-900 bg-transparent focus:outline-hidden"
                 />
                 <span className="text-slate-500 font-mono ml-1">%</span>
